@@ -1,0 +1,72 @@
+version: "3.9"
+# =============================================================================
+# FlowCore — Container 3: API + UI
+#
+# Runs via supervisord + nginx (5 processes in 1 container):
+#   - nginx reverse proxy          :8888  ← single host-exposed port
+#       /graphql         → graph-api-service      :4000
+#       /graphql-ws      → graph-api-service      :4000  (WebSocket)
+#       /api/insights/   → insights-api-service   :4001
+#       /api/eventing/   → eventing-integration   :4002
+#       /                → noc-frontend            :3000
+#
+# Access everything through http://localhost:8888
+#   - NOC UI:         http://localhost:8888/
+#   - GraphQL:        http://localhost:8888/graphql
+#   - Insights REST:  http://localhost:8888/api/insights/
+#   - Health check:   http://localhost:8888/health
+#
+# Prerequisites:
+#   flowcore-platform must be healthy (provides Keycloak + graph-updater)
+#   flowcore-agents must be healthy (provides drift events + classification)
+# =============================================================================
+
+services:
+
+  api-ui:
+    build:
+      context: ..
+      dockerfile: docker/dockerfiles/Dockerfile.api-ui
+    image: flowcore/api-ui:local
+    container_name: flowcore-api-ui
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NEO4J_HOST: neo4j
+      TS_HOST: timescaledb
+      PG_HOST: postgres
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # Keycloak runs inside the platform container, reachable by its service name
+      JWT_ISSUER: "http://platform:8080/realms/${KEYCLOAK_REALM:-flowcore}"
+      JWT_AUDIENCE: "${KEYCLOAK_CLIENT_ID:-flowcore-app}"
+    ports:
+      # Single nginx proxy port — all traffic enters here
+      - "${API_GATEWAY_PORT:-8888}:8888"
+    volumes:
+      - api_ui_logs:/var/log/supervisord
+      - api_nginx_logs:/var/log/nginx
+      - ./nginx/api-ui.conf:/etc/nginx/nginx.conf:ro
+      - ./supervisord/api-ui.conf:/etc/supervisor/conf.d/api-ui.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8888/health | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 45s
+    depends_on:
+      platform:
+        condition: service_healthy
+      agents:
+        condition: service_healthy
+    networks:
+      - flowcore-net
+
+volumes:
+  api_ui_logs:
+  api_nginx_logs:
+
+networks:
+  flowcore-net:
+    external: true
+    name: flowcore_flowcore-net

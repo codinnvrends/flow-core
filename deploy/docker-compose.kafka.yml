@@ -1,0 +1,132 @@
+version: "3.9"
+
+# =============================================================================
+# FlowCore — Compose 2: Kafka (KRaft) + Kafka UI
+# Single container: Redpanda (Kafka-compatible, KRaft, no ZooKeeper)
+# Kafka UI: Redpanda Console on port 8090
+#
+# Redpanda speaks the Kafka wire protocol — all Kafka client libraries
+# connect to it unchanged. Swap for Apache Kafka in production.
+#
+# Start:  docker compose -f docker-compose.kafka.yml up -d
+# Topics created automatically by topic-init one-shot container.
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Kafka — Redpanda (single-node KRaft, Kafka-compatible)
+  # ---------------------------------------------------------------------------
+  kafka:
+    image: redpandadata/redpanda:latest
+    container_name: flowcore-kafka
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://flowcore-kafka:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://flowcore-kafka:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr flowcore-kafka:33145
+      - --advertise-rpc-addr flowcore-kafka:33145
+      - --mode dev-container
+      - --smp 1
+      - --default-log-level=warn
+    ports:
+      - "${KAFKA_EXTERNAL_PORT}:19092"   # External Kafka client access
+      - "${REDPANDA_ADMIN_PORT}:9644"    # Admin API
+      - "18081:18081"                    # Schema Registry (external)
+      - "18082:18082"                    # REST Proxy (external)
+    volumes:
+      - kafka_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+    networks:
+      - flowcore-net
+
+  # ---------------------------------------------------------------------------
+  # Topic initialisation — one-shot container
+  # Creates all 12 Phase 1 Kafka topics then exits.
+  # Downstream services depend on this having exited successfully.
+  # ---------------------------------------------------------------------------
+  kafka-topic-init:
+    image: redpandadata/redpanda:latest
+    container_name: flowcore-kafka-topic-init
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        echo "Creating FlowCore Kafka topics..."
+        BROKER="flowcore-kafka:9092"
+
+        create_topic() {
+          rpk topic create "$1" \
+            --brokers "$BROKER" \
+            --partitions "${2:-3}" \
+            --replicas 1 \
+            --config retention.ms="${3:-604800000}" \
+            2>/dev/null || echo "  $1 already exists"
+          echo "  + $1 (partitions=${2:-3})"
+        }
+
+        # Phase 1 — 12 authoritative topics (PRD §6.2)
+        # Retention: 7 days default, 30 days for audit/archive topics
+        create_topic "dcim.config.raw"         3  2592000000   # 30 days
+        create_topic "dcim.config.normalized"  3  604800000    # 7 days
+        create_topic "metrics.timeseries.raw"  6  86400000     # 1 day (high volume)
+        create_topic "alerts.raw"              3  604800000
+        create_topic "events.raw"              3  2592000000   # 30 days
+        create_topic "discovery.snmp.results"  3  604800000
+        create_topic "discovery.bmc.results"   3  604800000
+        create_topic "graph.mutations"         3  2592000000   # 30 days (audit)
+        create_topic "drift.events"            3  604800000
+        create_topic "drift.suggestions"       3  604800000
+        create_topic "classification.results"  3  604800000
+        create_topic "incidents.correlated"    3  604800000    # Phase 2
+
+        # Dead letter topic
+        create_topic "flowcore.dead-letter"    3  2592000000
+
+        echo "All topics created successfully."
+        rpk topic list --brokers "$BROKER"
+    networks:
+      - flowcore-net
+
+  # ---------------------------------------------------------------------------
+  # Kafka UI — Redpanda Console
+  # Browse topics, consumer groups, messages at http://localhost:8090
+  # ---------------------------------------------------------------------------
+  kafka-ui:
+    image: redpandadata/console:latest
+    container_name: flowcore-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      kafka-topic-init:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BROKERS:             flowcore-kafka:9092
+      REDPANDA_ADMIN_URLS:       http://flowcore-kafka:9644
+      KAFKA_SCHEMAREGISTRY_ENABLED: "true"
+      KAFKA_SCHEMAREGISTRY_URLS: http://flowcore-kafka:8081
+    ports:
+      - "${KAFKA_UI_PORT}:8080"
+    networks:
+      - flowcore-net
+
+volumes:
+  kafka_data:
+
+networks:
+  flowcore-net:
+    name: flowcore-net
+    external: true

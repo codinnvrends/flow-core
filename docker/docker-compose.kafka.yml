@@ -1,0 +1,126 @@
+version: "3.9"
+# =============================================================================
+# FlowCore — Container 4: Kafka (KRaft) + Kafka UI
+#
+# Uses Redpanda: a Kafka-compatible broker that runs in KRaft mode with no
+# ZooKeeper, no controller quorum setup, and an embedded web UI.
+# Every FlowCore service uses the standard Kafka client library — no changes
+# needed when swapping to Apache Kafka in production.
+#
+# Run standalone:
+#   docker compose -f docker/docker-compose.yml \
+#                  -f docker/docker-compose.kafka.yml up -d
+#
+# Or via the full orchestrator:
+#   docker compose -f docker/docker-compose.full.yml up -d kafka
+# =============================================================================
+
+services:
+
+  kafka:
+    image: redpandadata/redpanda:latest
+    container_name: flowcore-kafka
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://kafka:9092,external://localhost:19092
+      - --schema-registry-addr http://0.0.0.0:8081
+      - --rpc-addr kafka:33145
+      - --advertise-rpc-addr kafka:33145
+      - --mode dev-container
+      - --smp 1
+      - --memory 512M
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --node-id 0
+      - --check=false
+    ports:
+      - "${REDPANDA_KAFKA_PORT:-9092}:9092"      # internal Kafka (services use this)
+      - "19092:19092"                             # external Kafka (host tools)
+      - "${REDPANDA_UI_PORT:-8090}:8080"          # Redpanda Console (Kafka UI)
+      - "9644:9644"                               # Redpanda admin API
+    volumes:
+      - kafka_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+    networks:
+      - flowcore-net
+
+  # ---------------------------------------------------------------------------
+  # Topic initialisation — one-shot container that creates all 12 Kafka topics
+  # and exits. Downstream services depend on this having exited 0.
+  # ---------------------------------------------------------------------------
+  kafka-init:
+    image: redpandadata/redpanda:latest
+    container_name: flowcore-kafka-init
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Creating FlowCore Kafka topics..."
+        # Format: rpk topic create <name> --brokers kafka:9092 --partitions N --replicas 1
+        for topic in \
+          dcim.config.raw \
+          dcim.config.normalized \
+          metrics.timeseries.raw \
+          alerts.raw \
+          events.raw \
+          discovery.snmp.results \
+          discovery.bmc.results \
+          graph.mutations \
+          drift.events \
+          drift.suggestions \
+          classification.results \
+          incidents.correlated; do
+          rpk topic create $$topic \
+            --brokers kafka:9092 \
+            --partitions 3 \
+            --replicas 1 \
+            --topic-config retention.ms=604800000 \
+            --topic-config cleanup.policy=delete \
+            2>&1 || echo "Topic $$topic may already exist — continuing"
+        done
+        echo "All topics created."
+    networks:
+      - flowcore-net
+
+  # ---------------------------------------------------------------------------
+  # Redpanda Console — Web UI for Kafka topic browsing and management
+  # ---------------------------------------------------------------------------
+  kafka-ui:
+    image: redpandadata/console:latest
+    container_name: flowcore-kafka-ui
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      CONSOLE_CONFIG_FILE: |
+        kafka:
+          brokers: ["kafka:9092"]
+        redpanda:
+          adminApi:
+            enabled: true
+            urls: ["http://kafka:9644"]
+    ports:
+      - "${KAFKA_UI_PORT:-8090}:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - flowcore-net
+
+networks:
+  flowcore-net:
+    external: true
+    name: flowcore_flowcore-net
+
+volumes:
+  kafka_data:

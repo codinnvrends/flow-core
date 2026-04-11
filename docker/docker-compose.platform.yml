@@ -1,0 +1,89 @@
+version: "3.9"
+# =============================================================================
+# FlowCore — Container 2: Platform Services
+#
+# Runs via supervisord (8 processes in 1 container):
+#   - Schema Registry proxy (Redpanda's built-in, :8081)
+#   - Keycloak dev server (:8080)
+#   - dcim-ingestion-service (:8001)
+#   - telemetry-gateway-service (:8002 HTTP, :9999 UDP)
+#   - active-discovery-service (:8003)
+#   - graph-updater-service (:8010)
+#   - timeseries-writer-service (:8011)
+#   - event-archive-service (:8012)
+#
+# Prerequisites (must be healthy before this starts):
+#   flowcore-postgres, flowcore-timescaledb, flowcore-neo4j (docker-compose.yml)
+#   flowcore-kafka, flowcore-kafka-init (docker-compose.kafka.yml)
+#
+# Run standalone:
+#   docker compose \
+#     -f docker/docker-compose.yml \
+#     -f docker/docker-compose.kafka.yml \
+#     -f docker/docker-compose.platform.yml up -d platform
+# =============================================================================
+
+services:
+
+  platform:
+    build:
+      context: ..
+      dockerfile: docker/dockerfiles/Dockerfile.platform
+    image: flowcore/platform:local
+    container_name: flowcore-platform
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Override env vars with Docker service names for internal DNS resolution
+      PG_HOST: postgres
+      TS_HOST: timescaledb
+      NEO4J_HOST: neo4j
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KEYCLOAK_PORT: "8080"
+    ports:
+      # Keycloak admin UI (also used by other services for token validation)
+      - "${KEYCLOAK_PORT:-8080}:8080"
+      # Ingestion service admin APIs (for local testing / curl)
+      - "${DCIM_INGESTION_PORT:-8001}:8001"
+      - "${TELEMETRY_GATEWAY_HTTP_PORT:-8002}:8002"
+      - "${TELEMETRY_GATEWAY_UDP_PORT:-9999}:9999/udp"
+      - "${ACTIVE_DISCOVERY_PORT:-8003}:8003"
+      # Processing service health endpoints
+      - "${GRAPH_UPDATER_PORT:-8010}:8010"
+      - "${TIMESERIES_WRITER_PORT:-8011}:8011"
+      - "${EVENT_ARCHIVE_PORT:-8012}:8012"
+    volumes:
+      - platform_keycloak_data:/opt/keycloak/data
+      - platform_logs:/var/log/supervisord
+      # Keycloak realm import — pre-seeds 4 RBAC roles + test users
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/flowcore-realm.json:ro
+      # Supervisord config
+      - ./supervisord/platform.conf:/etc/supervisor/conf.d/platform.conf:ro
+    healthcheck:
+      # Check that graph-updater (the most critical service) is responding
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${GRAPH_UPDATER_PORT:-8010}/health | grep -q ok"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    networks:
+      - flowcore-net
+
+volumes:
+  platform_keycloak_data:
+  platform_logs:
+
+networks:
+  flowcore-net:
+    external: true
+    name: flowcore_flowcore-net

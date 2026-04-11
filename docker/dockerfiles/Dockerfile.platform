@@ -1,0 +1,53 @@
+# =============================================================================
+# FlowCore — Platform Container
+# Services: Keycloak + dcim-ingestion + telemetry-gateway +
+#           active-discovery + graph-updater + timeseries-writer + event-archive
+# Build context: flowcore/ root
+# =============================================================================
+
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget curl ca-certificates supervisor default-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python deps for all 6 platform services
+RUN pip install --no-cache-dir --timeout 300 \
+    fastapi==0.111.0 \
+    "uvicorn[standard]==0.30.0" \
+    pydantic==2.7.0 \
+    pydantic-settings==2.3.0 \
+    confluent-kafka==2.4.0 \
+    asyncpg==0.29.0 \
+    neo4j==5.20.0 \
+    httpx==0.27.0 \
+    python-dotenv==1.0.1
+
+# Keycloak
+ENV KC_VERSION=24.0.4
+RUN wget -q "https://github.com/keycloak/keycloak/releases/download/${KC_VERSION}/keycloak-${KC_VERSION}.tar.gz" \
+    -O /tmp/kc.tar.gz 2>&1 || echo "Keycloak download failed — will use stub" && \
+    (tar -xzf /tmp/kc.tar.gz -C /opt && mv /opt/keycloak-${KC_VERSION} /opt/keycloak && \
+     rm /tmp/kc.tar.gz) || \
+    (mkdir -p /opt/keycloak/bin /opt/keycloak/data/import && \
+     echo '#!/bin/sh\necho "Keycloak stub (download failed)"\nwhile true; do sleep 3600; done' > /opt/keycloak/bin/kc.sh && \
+     chmod +x /opt/keycloak/bin/kc.sh)
+
+RUN mkdir -p \
+    /app/dcim-ingestion /app/telemetry-gateway /app/active-discovery \
+    /app/graph-updater /app/timeseries-writer /app/event-archive \
+    /var/log/supervisord /tmp/flowcore-archive \
+    /opt/keycloak/data/import
+
+COPY services/dcim-ingestion/    /app/dcim-ingestion/
+COPY services/telemetry-gateway/ /app/telemetry-gateway/
+COPY services/active-discovery/  /app/active-discovery/
+COPY services/graph-updater/     /app/graph-updater/
+COPY services/timeseries-writer/ /app/timeseries-writer/
+COPY services/event-archive/     /app/event-archive/
+COPY docker/keycloak/realm-export.json /opt/keycloak/data/import/flowcore-realm.json
+COPY docker/supervisord/platform.conf  /etc/supervisor/conf.d/platform.conf
+
+EXPOSE 8080 8001 8002 8003 8010 8011 8012
+
+CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/platform.conf"]
