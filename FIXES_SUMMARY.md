@@ -241,9 +241,56 @@ git checkout -b temp-backup
 git checkout fix-for-kafka-and-UI-etc-working-system
 git reset --soft HEAD~1
 git add .gitignore noc-frontend/.env scripts/container.sh
-git add docker/ scripts/ services/
+git add docker/ services/
 git commit -m "Fix for kafka and UI etc working system"
 git push -f -u origin fix-for-kafka-and-UI-etc-working-system
+```
+
+### Switch Branches with Local Changes
+```bash
+# Stash current changes and switch branch
+git stash push -m "Description of changes"
+git checkout main
+
+# Or discard changes and switch
+git checkout --force main
+
+# Restore stashed changes later
+git stash pop
+git stash list  # View all stashes
+```
+
+### Copy Files from Another Branch
+```bash
+# Extract file from another branch to current branch
+git show fix-for-kafka-and-UI-etc-working-system:README.md > README.md
+git show fix-for-kafka-and-UI-etc-working-system:FIXES_SUMMARY.md > FIXES_SUMMARY.md
+
+# Stage and commit
+git add README.md FIXES_SUMMARY.md
+git commit -m "Add updated documentation"
+```
+
+### Resolve Merge Conflicts (Keep Local Version)
+```bash
+# When pull creates conflicts, use local version (--ours)
+git checkout --ours README.md
+git add README.md
+git commit -m "Resolved conflict keeping local version"
+
+# Alternative: use remote version (--theirs)
+git checkout --theirs README.md
+git add README.md
+git commit -m "Resolved conflict using remote version"
+```
+
+### Pull with Merge (Non-Rebase)
+```bash
+# When remote is ahead and you have local commits
+git pull --no-rebase origin main
+
+# Resolve any conflicts, then push
+git push origin main
 ```
 
 ---
