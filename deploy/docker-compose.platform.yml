@@ -1,0 +1,115 @@
+version: "3.9"
+
+# =============================================================================
+# FlowCore — Compose 3: Platform Container
+# Group 2: Schema Registry · Keycloak · dcim-ingestion · telemetry-gateway ·
+#          active-discovery · graph-updater · timeseries-writer · event-archive
+#
+# Process manager: supervisord (one process per service)
+# Health: GET http://localhost:8099/health  — aggregates all internal services
+#
+# Start:  docker compose -f docker-compose.platform.yml up -d
+# Logs:   docker compose -f docker-compose.platform.yml logs -f
+# Shell:  docker exec -it flowcore-platform bash
+# Supervisor status:
+#         docker exec flowcore-platform supervisorctl status
+# =============================================================================
+
+services:
+
+  platform:
+    build:
+      context: ./platform
+      dockerfile: Dockerfile
+    image: flowcore/platform:local
+    container_name: flowcore-platform
+    restart: unless-stopped
+
+    # ── All service ports exposed directly (no proxy for this group) ──────────
+    ports:
+      - "${KEYCLOAK_PORT}:8080"               # Keycloak admin + OIDC
+      - "${DCIM_INGESTION_PORT}:8001"          # dcim-ingestion admin REST
+      - "${TELEMETRY_GATEWAY_PORT}:8002"       # telemetry-gateway HTTP
+      - "${TELEMETRY_GATEWAY_UDP_PORT}:9999/udp" # SNMP trap UDP
+      - "${ACTIVE_DISCOVERY_PORT}:8003"        # active-discovery REST
+      - "${GRAPH_UPDATER_PORT}:8010"           # graph-updater REST
+      - "${TIMESERIES_WRITER_PORT}:8011"       # timeseries-writer REST
+      - "${EVENT_ARCHIVE_PORT}:8012"           # event-archive REST
+      - "8099:8099"                            # health aggregator
+
+    environment:
+      # Stores
+      POSTGRES_HOST:        ${POSTGRES_HOST}
+      POSTGRES_PORT:        ${POSTGRES_PORT}
+      POSTGRES_DB:          ${POSTGRES_DB}
+      POSTGRES_USER:        ${POSTGRES_USER}
+      POSTGRES_PASSWORD:    ${POSTGRES_PASSWORD}
+      TIMESCALE_HOST:       ${TIMESCALE_HOST}
+      TIMESCALE_PORT:       ${TIMESCALE_PORT}
+      TIMESCALE_DB:         ${TIMESCALE_DB}
+      TIMESCALE_USER:       ${TIMESCALE_USER}
+      TIMESCALE_PASSWORD:   ${TIMESCALE_PASSWORD}
+      NEO4J_HOST:           ${NEO4J_HOST}
+      NEO4J_BOLT_PORT:      ${NEO4J_BOLT_PORT}
+      NEO4J_USER:           ${NEO4J_USER}
+      NEO4J_PASSWORD:       ${NEO4J_PASSWORD}
+      # Kafka
+      KAFKA_BOOTSTRAP:      ${KAFKA_BOOTSTRAP}
+      # S3 / MinIO
+      S3_ENDPOINT:          ${S3_ENDPOINT}
+      S3_ACCESS_KEY:        ${S3_ACCESS_KEY}
+      S3_SECRET_KEY:        ${S3_SECRET_KEY}
+      S3_BUCKET:            ${S3_BUCKET}
+      # Keycloak
+      KEYCLOAK_ADMIN:           ${KEYCLOAK_ADMIN}
+      KEYCLOAK_ADMIN_PASSWORD:  ${KEYCLOAK_ADMIN_PASSWORD}
+      KEYCLOAK_PORT:            ${KEYCLOAK_PORT}
+      # Service ports (used by supervisord and health aggregator)
+      DCIM_INGESTION_PORT:          ${DCIM_INGESTION_PORT}
+      TELEMETRY_GATEWAY_PORT:       ${TELEMETRY_GATEWAY_PORT}
+      TELEMETRY_GATEWAY_UDP_PORT:   ${TELEMETRY_GATEWAY_UDP_PORT}
+      ACTIVE_DISCOVERY_PORT:        ${ACTIVE_DISCOVERY_PORT}
+      GRAPH_UPDATER_PORT:           ${GRAPH_UPDATER_PORT}
+      TIMESERIES_WRITER_PORT:       ${TIMESERIES_WRITER_PORT}
+      EVENT_ARCHIVE_PORT:           ${EVENT_ARCHIVE_PORT}
+
+    volumes:
+      # Development: mount service source dirs for hot reload
+      # Comment these out and use COPY in Dockerfile for production builds.
+      - ../services/dcim-ingestion:/app/dcim-ingestion
+      - ../services/telemetry-gateway:/app/telemetry-gateway
+      - ../services/active-discovery:/app/active-discovery
+      - ../services/graph-updater:/app/graph-updater
+      - ../services/timeseries-writer:/app/timeseries-writer
+      - ../services/event-archive:/app/event-archive
+      # Supervisor log persistence
+      - platform_logs:/var/log/supervisor
+      # Keycloak data persistence (survives restarts in dev mode)
+      - keycloak_data:/opt/keycloak/data
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8099/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+    # ── Resource limits (local dev) ───────────────────────────────────────────
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 1G
+
+    networks:
+      - flowcore-net
+
+volumes:
+  platform_logs:
+  keycloak_data:
+
+networks:
+  flowcore-net:
+    name: flowcore-net
+    external: true

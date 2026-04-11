@@ -1,0 +1,109 @@
+version: "3.9"
+
+# =============================================================================
+# FlowCore — Compose 4: API + NOC Frontend Container
+# Group 3: graph-api-service · insights-api-service ·
+#          eventing-integration · noc-frontend
+#
+# Process manager: supervisord
+# External access: single nginx proxy on port 8000
+#
+# Endpoints (all via port 8000):
+#   http://localhost:8000/          NOC frontend (React)
+#   http://localhost:8000/graphql   GraphQL API + WebSocket subscriptions
+#   http://localhost:8000/api/insights/  Insights REST API
+#   http://localhost:8000/api/events/    Eventing integration REST API
+#
+# Start:   docker compose -f docker-compose.api.yml up -d
+# Logs:    docker compose -f docker-compose.api.yml logs -f
+# Shell:   docker exec -it flowcore-api bash
+# Supervisor status:
+#          docker exec flowcore-api supervisorctl status
+# =============================================================================
+
+services:
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: flowcore/api:local
+    container_name: flowcore-api
+    restart: unless-stopped
+
+    ports:
+      - "${API_GATEWAY_PORT}:8000"   # Single nginx-proxied entry point
+
+    environment:
+      # Stores
+      POSTGRES_HOST:      ${POSTGRES_HOST}
+      POSTGRES_PORT:      ${POSTGRES_PORT}
+      POSTGRES_DB:        ${POSTGRES_DB}
+      POSTGRES_USER:      ${POSTGRES_USER}
+      POSTGRES_PASSWORD:  ${POSTGRES_PASSWORD}
+      TIMESCALE_HOST:     ${TIMESCALE_HOST}
+      TIMESCALE_PORT:     ${TIMESCALE_PORT}
+      TIMESCALE_DB:       ${TIMESCALE_DB}
+      TIMESCALE_USER:     ${TIMESCALE_USER}
+      TIMESCALE_PASSWORD: ${TIMESCALE_PASSWORD}
+      NEO4J_HOST:         ${NEO4J_HOST}
+      NEO4J_BOLT_PORT:    ${NEO4J_BOLT_PORT}
+      NEO4J_USER:         ${NEO4J_USER}
+      NEO4J_PASSWORD:     ${NEO4J_PASSWORD}
+      # Kafka
+      KAFKA_BOOTSTRAP:    ${KAFKA_BOOTSTRAP}
+      # Auth
+      KEYCLOAK_PORT:      ${KEYCLOAK_PORT}
+      KEYCLOAK_REALM:     ${KEYCLOAK_REALM}
+      JWT_SECRET:         ${JWT_SECRET}
+      # Internal service ports (used by supervisord)
+      GRAPH_API_INTERNAL_PORT:             ${GRAPH_API_INTERNAL_PORT}
+      INSIGHTS_API_INTERNAL_PORT:          ${INSIGHTS_API_INTERNAL_PORT}
+      EVENTING_INTEGRATION_INTERNAL_PORT:  ${EVENTING_INTEGRATION_INTERNAL_PORT}
+      NOC_FRONTEND_INTERNAL_PORT:          ${NOC_FRONTEND_INTERNAL_PORT}
+      API_GATEWAY_PORT:                    ${API_GATEWAY_PORT}
+      # Platform container reference (for health wait in entrypoint)
+      GRAPH_UPDATER_PORT: ${GRAPH_UPDATER_PORT}
+
+    volumes:
+      # Development: mount service source dirs (hot reload via nodemon/Vite HMR)
+      - ../services/graph-api:/app/graph-api
+      - ../services/insights-api:/app/insights-api
+      - ../services/eventing-integration:/app/eventing-integration
+      - ../../noc-frontend:/app/noc-frontend
+      # Persist npm node_modules across restarts (avoids re-install on every start)
+      - graph_api_modules:/app/graph-api/node_modules
+      - insights_api_modules:/app/insights-api/node_modules
+      - eventing_modules:/app/eventing-integration/node_modules
+      - frontend_modules:/app/noc-frontend/node_modules
+      # Log persistence
+      - api_logs:/var/log/supervisor
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/nginx-health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+    networks:
+      - flowcore-net
+
+volumes:
+  graph_api_modules:
+  insights_api_modules:
+  eventing_modules:
+  frontend_modules:
+  api_logs:
+
+networks:
+  flowcore-net:
+    name: flowcore-net
+    external: true

@@ -1,0 +1,78 @@
+version: "3.9"
+# =============================================================================
+# FlowCore — Container 5 (Option A): Synthetic Replay
+#
+# Reads from the seeded PostgreSQL and TimescaleDB databases and publishes
+# to Kafka topics at a configurable rate — replacing real upstream DCIM,
+# telemetry, and discovery sources.
+#
+# Two modes (set REPLAY_MODE in .env):
+#   live       — generates new metric datapoints in real time at
+#                REPLAY_EVENTS_PER_SEC events/sec. Use this for continuous
+#                Digital Twin updates and NFR-06 throughput tests.
+#   historical — replays the 30-day seed data in compressed time.
+#                REPLAY_HISTORICAL_SPEED=60 means 1 real second = 60
+#                simulated seconds (30 days replayed in ~12 minutes).
+#
+# Control API at :8050:
+#   GET  /health           — liveness
+#   GET  /status           — current mode, events/sec, topics being written
+#   POST /control/pause    — pause publishing
+#   POST /control/resume   — resume publishing
+#   POST /control/rate     — body: {"events_per_sec": N}  — adjust live rate
+#   POST /control/reset    — restart historical replay from beginning
+#
+# This container is ONLY needed for Option A (synthetic data deployment).
+# Remove it when connecting to real DCIM / telemetry sources.
+# =============================================================================
+
+services:
+
+  synthetic-replay:
+    build:
+      context: ..
+      dockerfile: docker/dockerfiles/Dockerfile.replay
+    image: flowcore/synthetic-replay:local
+    container_name: flowcore-replay
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_USER: "${PG_USER:-flowcore}"
+      PG_PASSWORD: "${PG_PASSWORD:-flowcore_secret}"
+      PG_DB: "${PG_DB:-flowcore}"
+      TS_HOST: timescaledb
+      TS_PORT: "5432"
+      TS_USER: "${TS_USER:-flowcore}"
+      TS_PASSWORD: "${TS_PASSWORD:-flowcore_secret}"
+      TS_DB: "${TS_DB:-flowcore_ts}"
+      REPLAY_MODE: "${REPLAY_MODE:-live}"
+      REPLAY_EVENTS_PER_SEC: "${REPLAY_EVENTS_PER_SEC:-1000}"
+      REPLAY_HISTORICAL_SPEED: "${REPLAY_HISTORICAL_SPEED:-60}"
+      REPLAY_PORT: "${REPLAY_PORT:-8050}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    ports:
+      - "${REPLAY_PORT:-8050}:8050"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${REPLAY_PORT:-8050}/health | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    networks:
+      - flowcore-net
+
+networks:
+  flowcore-net:
+    external: true
+    name: flowcore_flowcore-net

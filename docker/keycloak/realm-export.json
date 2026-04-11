@@ -1,0 +1,71 @@
+{
+  "realm": "flowcore",
+  "displayName": "FlowCore",
+  "enabled": true,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "accessTokenLifespan": 300,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "bruteForceProtected": false,
+
+  "roles": {
+    "realm": [
+      { "name": "NOC_OPERATOR",   "description": "Read + feedback. Tier-1/2 NOC engineers." },
+      { "name": "CHANGE_MANAGER", "description": "Read + simulation. Change managers." },
+      { "name": "DC_ADMIN",       "description": "Read + write entity attributes + approve drift." },
+      { "name": "PLATFORM_ADMIN", "description": "Full access including tenant + source config." }
+    ]
+  },
+
+  "clients": [
+    {
+      "clientId": "flowcore-app",
+      "name": "FlowCore NOC Application",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "flowcore-client-secret",
+      "redirectUris": ["http://localhost:8888/*", "http://localhost:3000/*"],
+      "webOrigins": ["http://localhost:8888", "http://localhost:3000"],
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "protocol": "openid-connect",
+      "attributes": { "post.logout.redirect.uris": "http://localhost:8888/*" }
+    }
+  ],
+
+  "users": [
+    {
+      "username": "noc-operator",
+      "email": "noc.operator@flowcore.local",
+      "firstName": "NOC", "lastName": "Operator",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "operator123", "temporary": false }],
+      "realmRoles": ["NOC_OPERATOR"]
+    },
+    {
+      "username": "change-manager",
+      "email": "change.manager@flowcore.local",
+      "firstName": "Change", "lastName": "Manager",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "manager123", "temporary": false }],
+      "realmRoles": ["CHANGE_MANAGER"]
+    },
+    {
+      "username": "dc-admin",
+      "email": "dc.admin@flowcore.local",
+      "firstName": "DC", "lastName": "Admin",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "dcadmin123", "temporary": false }],
+      "realmRoles": ["DC_ADMIN"]
+    },
+    {
+      "username": "platform-admin",
+      "email": "platform.admin@flowcore.local",
+      "firstName": "Platform", "lastName": "Admin",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "platformadmin123", "temporary": false }],
+      "realmRoles": ["PLATFORM_ADMIN"]
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+version: "3.9"
+# =============================================================================
+# FlowCore — Container 4: AI Agents
+#
+# Runs via supervisord (3 processes in 1 container):
+#   - MLflow tracking server        :5000  (host-exposed — model registry UI)
+#   - topology-reconciliation-agent :8020
+#   - classification-capability-agent :8021
+#
+# Both agents are Python FastAPI services using uvicorn.
+# MLflow uses SQLite backend + local artifact store for local dev.
+#
+# Prerequisites:
+#   flowcore-platform must be healthy (Kafka topics exist, Neo4j populated)
+# =============================================================================
+
+services:
+
+  agents:
+    build:
+      context: ..
+      dockerfile: docker/dockerfiles/Dockerfile.agents
+    image: flowcore/agents:local
+    container_name: flowcore-agents
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      NEO4J_HOST: neo4j
+      NEO4J_BOLT_PORT: "7687"
+      NEO4J_USER: "${NEO4J_USER:-neo4j}"
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD:-flowcore_secret}"
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_USER: "${PG_USER:-flowcore}"
+      PG_PASSWORD: "${PG_PASSWORD:-flowcore_secret}"
+      PG_DB: "${PG_DB:-flowcore}"
+      MLFLOW_PORT: "${MLFLOW_PORT:-5000}"
+      TOPO_AGENT_PORT: "${TOPO_AGENT_PORT:-8020}"
+      CLASS_AGENT_PORT: "${CLASS_AGENT_PORT:-8021}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    ports:
+      # MLflow UI — host exposed for model registry access
+      - "${MLFLOW_PORT:-5000}:5000"
+      # Agent health + REST endpoints
+      - "${TOPO_AGENT_PORT:-8020}:8020"
+      - "${CLASS_AGENT_PORT:-8021}:8021"
+    volumes:
+      - agents_mlflow_db:/mlflow/db
+      - agents_mlflow_artifacts:/mlflow/artifacts
+      - agents_logs:/var/log/supervisord
+      - ./supervisord/agents.conf:/etc/supervisor/conf.d/agents.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL",
+             "wget -qO- http://localhost:${TOPO_AGENT_PORT:-8020}/health | grep -q ok &&
+              wget -qO- http://localhost:${CLASS_AGENT_PORT:-8021}/health | grep -q ok"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    depends_on:
+      platform:
+        condition: service_healthy
+    networks:
+      - flowcore-net
+
+volumes:
+  agents_mlflow_db:
+  agents_mlflow_artifacts:
+  agents_logs:
+
+networks:
+  flowcore-net:
+    external: true
+    name: flowcore_flowcore-net

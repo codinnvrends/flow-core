@@ -1,0 +1,27 @@
+# =============================================================================
+# FlowCore — Synthetic Replay Container (Option A)
+# Build context: flowcore/ root
+# =============================================================================
+
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl wget \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    fastapi==0.111.0 \
+    "uvicorn[standard]==0.30.0" \
+    pydantic==2.7.0 \
+    pydantic-settings==2.3.0 \
+    confluent-kafka==2.4.0 \
+    asyncpg==0.29.0 \
+    python-dotenv==1.0.1
+
+RUN mkdir -p /app/synthetic-replay
+COPY services/synthetic-replay/ /app/synthetic-replay/
+
+WORKDIR /app/synthetic-replay
+EXPOSE 8050
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8050", "--log-level", "info"]

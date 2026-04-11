@@ -1,0 +1,49 @@
+version: "3.9"
+# =============================================================================
+# FlowCore — Full Stack Orchestrator
+#
+# Includes all five compose files and defines the correct startup order.
+# This is the single file to use for a complete local deployment.
+#
+# Usage (run from the flowcore/ root directory):
+#   docker compose -f docker/docker-compose.full.yml up -d          # full stack
+#   docker compose -f docker/docker-compose.full.yml up -d stores   # stores only
+#   docker compose -f docker/docker-compose.full.yml up -d kafka    # + kafka
+#   docker compose -f docker/docker-compose.full.yml up -d platform # + platform
+#   docker compose -f docker/docker-compose.full.yml up -d agents   # + agents
+#   docker compose -f docker/docker-compose.full.yml up -d api-ui   # + UI
+#   docker compose -f docker/docker-compose.full.yml up -d replay   # + replay
+#
+# Startup order (enforced by depends_on healthchecks):
+#   1. stores    (postgres, timescaledb, neo4j)     — existing compose
+#   2. kafka     (redpanda + topic init)             — compose.kafka.yml
+#   3. platform  (keycloak + 6 services)             — compose.platform.yml
+#      replay    (synthetic data publisher)           — compose.replay.yml (parallel with platform)
+#   4. agents    (topology + classification + mlflow) — compose.agents.yml
+#   5. api-ui    (nginx + 3 APIs + frontend)          — compose.api.yml
+#
+# To rebuild all images after code changes:
+#   docker compose -f docker/docker-compose.full.yml build
+#
+# To wipe all data and start fresh:
+#   docker compose -f docker/docker-compose.full.yml down -v
+# =============================================================================
+
+include:
+  # Layer 0: Persistent stores (already exists — do not modify)
+  - path: docker-compose.yml
+
+  # Layer 1: Kafka backbone + topic initialisation
+  - path: docker-compose.kafka.yml
+
+  # Layer 2: Platform services (ingestion + processing + auth)
+  - path: docker-compose.platform.yml
+
+  # Layer 2 (parallel): Synthetic replay (Option A only)
+  - path: docker-compose.replay.yml
+
+  # Layer 3: AI agents + MLflow
+  - path: docker-compose.agents.yml
+
+  # Layer 4: API gateway + UI
+  - path: docker-compose.api.yml

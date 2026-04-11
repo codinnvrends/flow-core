@@ -1,0 +1,119 @@
+version: "3.9"
+
+# =============================================================================
+# FlowCore — Compose 1: Persistent Stores
+# PostgreSQL (Layer 2+4) · TimescaleDB (Layer 3) · Neo4j (Layer 1)
+#
+# Start:  docker compose -f docker-compose.stores.yml up -d
+# Stop:   docker compose -f docker-compose.stores.yml down
+# Wipe:   docker compose -f docker-compose.stores.yml down -v
+# =============================================================================
+
+services:
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: flowcore-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA:            /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - flowcore-net
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: flowcore-timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:               ${TIMESCALE_DB}
+      POSTGRES_USER:             ${TIMESCALE_USER}
+      POSTGRES_PASSWORD:         ${TIMESCALE_PASSWORD}
+      PGDATA:                    /var/lib/postgresql/data/pgdata
+      TIMESCALEDB_TELEMETRY:     "off"
+    command: >
+      postgres
+      -c shared_preload_libraries=timescaledb
+      -c timescaledb.telemetry_level=off
+    ports:
+      - "${TIMESCALE_PORT}:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TIMESCALE_USER} -d ${TIMESCALE_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - flowcore-net
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: flowcore-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH:                                neo4j/${NEO4J_PASSWORD}
+      NEO4J_PLUGINS:                             '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_dbms_memory_heap_initial__size:      512m
+      NEO4J_dbms_memory_heap_max__size:          1G
+      NEO4J_dbms_memory_pagecache_size:          512m
+      NEO4J_server_default__listen__address:     0.0.0.0
+    ports:
+      - "${NEO4J_HTTP_PORT}:7474"
+      - "${NEO4J_BOLT_PORT}:7687"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7474"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+    networks:
+      - flowcore-net
+
+  # MinIO — S3-compatible object store for event-archive-service
+  minio:
+    image: minio/minio:latest
+    container_name: flowcore-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:     ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # MinIO console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - flowcore-net
+
+volumes:
+  postgres_data:
+  timescale_data:
+  neo4j_data:
+  neo4j_logs:
+  minio_data:
+
+networks:
+  flowcore-net:
+    name: flowcore-net
+    driver: bridge
