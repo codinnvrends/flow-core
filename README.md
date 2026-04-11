@@ -1,50 +1,176 @@
-# FlowCore — Persistent Stores (Synthetic Data)
+# FlowCore — Complete Digital Twin Platform
 
-End-to-end pipeline that generates realistic synthetic data and loads it into all three FlowCore persistent stores with a single command.
+End-to-end Digital Twin platform for data center infrastructure management with real-time telemetry ingestion, graph-based topology, ML-powered insights, and NOC visualization.
 
-## What's included
+## System Architecture
 
 ```
-flowcore/
-├── schema/
-│   ├── 01_postgresql_schema.sql     # Layer 2 + Layer 4 DDL (PostgreSQL 15)
-│   ├── 02_timescaledb_schema.sql    # Layer 3 DDL (TimescaleDB hypertables)
-│   └── 03_neo4j_schema.cypher       # Layer 1 constraints + indexes (Neo4j 5)
-├── generators/
-│   ├── generate_all.py              # Synthetic data generator (stdlib only)
-│   └── output/                      # Generated SQL/Cypher files (created on run)
-│       ├── postgresql_seed.sql
-│       ├── timescaledb_seed.sql
-│       └── neo4j_seed.cypher
-├── docker/
-│   └── docker-compose.yml           # PostgreSQL + TimescaleDB + Neo4j
-└── scripts/
-    ├── run_all.sh                   # Master bootstrap — one command to run everything
-    └── neo4j_loader.py              # Python-based Cypher loader
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              NOC FRONTEND (UI)                              │
+│                     http://localhost:8888/                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  API Gateway (:8888)  │  GraphQL API  │  Insights API  │  Eventing API      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  PLATFORM CONTAINER (:8080, 8001-8012, 9999)                              │
+│  ├── Keycloak (Auth)  ├── Graph Updater  ├── Ingestion Services           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  AGENTS CONTAINER (:5000, 8020, 8022)                                       │
+│  ├── MLflow UI (:5000)  ├── Topology Agent (:8020)  ├── Class Agent (:8022)│
+├─────────────────────────────────────────────────────────────────────────────┤
+│  REPLAY SERVICE (:8050)  →  KAFKA  →  All downstream consumers              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  PERSISTENT STORES                                                          │
+│  ├── Neo4j (Graph) :7474/:7687  ├── PostgreSQL :5432  ├── TimescaleDB :5433│
+│  └── Kafka (Redpanda) :9092  + Kafka UI :8091                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+## What's Included
+
+### Core Infrastructure (docker/docker-compose.yml)
+- **PostgreSQL** — Layer 2 reference data + Layer 4 agent outputs
+- **TimescaleDB** — Layer 3 time-series telemetry
+- **Neo4j** — Layer 1 graph topology
+
+### Streaming (docker/docker-compose.kafka.yml)
+- **Redpanda (Kafka)** — Event streaming, 12 topics
+- **Kafka UI** — Topic browser at http://localhost:8091/
+
+### Platform Services (docker/docker-compose.platform.yml)
+- **Keycloak** — Authentication at http://localhost:8080/
+- **Graph Updater** — Neo4j graph synchronization
+- **Ingestion Services** — DCIM, SNMP, BMC data ingestion
+
+### AI/ML Agents (docker/docker-compose.agents.yml)
+- **MLflow** — ML experiment tracking at http://localhost:5000/
+- **Topology Agent** — Network topology discovery (:8020)
+- **Classification Agent** — Device classification (:8022)
+
+### API + UI (docker/docker-compose.api.yml)
+- **GraphQL API** — Digital twin queries
+- **Insights API** — Anomaly detection, forecasting
+- **Eventing API** — Real-time event streaming
+- **NOC Frontend** — React UI at http://localhost:8888/
+
+### Synthetic Data (docker/docker-compose.replay.yml)
+- **Synthetic Replay** — Generates telemetry at 1000 events/sec, API at http://localhost:8050/
 
 ## Prerequisites
 
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Docker + Docker Compose | 24+ | Container runtime |
-| Python 3 | 3.9+ | Data generator (stdlib only, no pip install needed) |
-| psql | 15+ | PostgreSQL/TimescaleDB seed loader |
-| neo4j (Python driver) | 5+ | Neo4j seed loader (`pip install neo4j`) |
+| Python 3 | 3.9+ | Data generator (stdlib only) |
+| 8GB RAM | — | Minimum for all containers |
+| 20GB disk | — | For volumes and images |
 
-## Quick start
+## Quick Start
+
+### Option 1: One-Command Bootstrap (Recommended for first run)
 
 ```bash
-# 1. Make the bootstrap script executable
+# Make executable and run
 chmod +x scripts/run_all.sh
-
-# 2. Run everything — generates data, starts Docker, loads all stores
 ./scripts/run_all.sh
 
-# That's it. End-to-end takes ~5–15 minutes depending on machine speed.
+# End-to-end: ~10-20 minutes (generates data + starts all containers)
 ```
 
-## What gets created
+### Option 2: Container Manager Script (Recommended for daily use)
+
+```bash
+# Start all containers
+./scripts/container.sh start
+
+# Other commands
+./scripts/container.sh stop      # Stop all
+./scripts/container.sh restart   # Full restart
+./scripts/container.sh ps        # Show status
+./scripts/container.sh logs      # Follow logs
+```
+
+### Option 3: Manual Docker Compose
+
+```bash
+# Create Docker network
+docker network create flowcore_flowcore-net
+
+# Start all services
+docker compose \
+  -f docker/docker-compose.yml \
+  -f docker/docker-compose.kafka.yml \
+  -f docker/docker-compose.platform.yml \
+  -f docker/docker-compose.agents.yml \
+  -f docker/docker-compose.api.yml \
+  -f docker/docker-compose.replay.yml \
+  up -d
+```
+
+## Service URLs After Startup
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| **NOC UI** | http://localhost:8888/ | Main dashboard, racks, devices |
+| **GraphQL** | http://localhost:8888/graphql | Digital twin queries |
+| **MLflow UI** | http://localhost:5000/ | ML experiments, model registry |
+| **Kafka UI** | http://localhost:8091/ | Topic browser, consumer groups |
+| **Keycloak** | http://localhost:8080/ | Authentication admin |
+| **Replay API** | http://localhost:8050/ | Synthetic data control |
+| **Neo4j Browser** | http://localhost:7474/ | Graph visualization |
+
+## Connection Details
+
+### Databases
+| Store | Host | Port | User | Password | DB |
+|-------|------|------|------|----------|----|
+| PostgreSQL | localhost | 5432 | flowcore | flowcore_secret | flowcore |
+| TimescaleDB | localhost | 5433 | flowcore | flowcore_secret | flowcore_ts |
+| Neo4j | localhost | 7474/7687 | neo4j | flowcore_secret | — |
+
+### Kafka Topics
+```
+dcim.config.raw              dcim.config.normalized
+metrics.timeseries.raw       alerts.raw
+events.raw                   discovery.snmp.results
+discovery.bmc.results        graph.mutations
+drift.events                 drift.suggestions
+classification.results       incidents.correlated
+```
+
+## Project Structure
+
+```
+flowcore/
+├── docker/
+│   ├── docker-compose.yml              # Core: Postgres, TimescaleDB, Neo4j
+│   ├── docker-compose.kafka.yml        # Redpanda + Kafka UI
+│   ├── docker-compose.platform.yml     # Keycloak, Graph Updater, Ingestion
+│   ├── docker-compose.agents.yml       # MLflow, Topology, Classification
+│   ├── docker-compose.api.yml          # GraphQL, Insights, Eventing, NOC UI
+│   ├── docker-compose.replay.yml       # Synthetic telemetry generator
+│   └── dockerfiles/                    # Container build definitions
+├── services/
+│   ├── graph-api/                      # GraphQL resolvers
+│   ├── insights-api/                   # Analytics endpoints
+│   ├── eventing-integration/           # Real-time event streaming
+│   ├── synthetic-replay/               # Telemetry generator
+│   ├── classification-agent/           # ML classification
+│   └── topology-agent/                 # Network discovery
+├── noc-frontend/                       # React NOC UI
+├── schema/                             # SQL/Cypher DDL
+│   ├── 01_postgresql_schema.sql
+│   ├── 02_timescaledb_schema.sql
+│   └── 03_neo4j_schema.cypher
+├── generators/                         # Synthetic data generation
+│   └── generate_all.py
+├── scripts/
+│   ├── run_all.sh                      # Master bootstrap
+│   ├── container.sh                    # Container manager
+│   └── stack.sh                        # Stack orchestrator
+└── FIXES_SUMMARY.md                    # Troubleshooting guide
+```
+
+## What Gets Created
 
 **Scale (medium staging):**
 - 2 tenants: ENEA Fusion Research (EU) + Meridian Cloud Services (US)
@@ -56,38 +182,16 @@ chmod +x scripts/run_all.sh
 - 30 days of hourly metric datapoints (~2.3M rows in TimescaleDB)
 - Full Layer 4 agent output data: drift events, correlated incidents, capacity forecasts, anomaly flags, failure probability scores, simulation scenarios/results
 
-## Connection details (after bootstrap)
+## Troubleshooting
 
-| Store | Host | Port | User | Password | DB |
-|-------|------|------|------|----------|----|
-| PostgreSQL (Layer 2+4) | localhost | 5432 | flowcore | flowcore_secret | flowcore |
-| TimescaleDB (Layer 3) | localhost | 5433 | flowcore | flowcore_secret | flowcore_ts |
-| Neo4j (Layer 1) | localhost | 7474/7687 | neo4j | flowcore_secret | — |
+See `FIXES_SUMMARY.md` for detailed fixes including:
+- Docker build network timeouts
+- Port conflicts
+- UUID handling in synthetic replay
+- Large file git push issues
+- Container startup problems
 
-Neo4j Browser: http://localhost:7474
-
-## CLI options
-
-```bash
-# Quick dev run — 7 days, 100 devices
-./scripts/run_all.sh --days 7 --devices 100
-
-# Reproducible run with explicit seed
-./scripts/run_all.sh --seed 12345
-
-# Generate SQL/Cypher only (no Docker, no loading)
-./scripts/run_all.sh --generate-only
-
-# Load into existing stores (skip Docker startup)
-./scripts/run_all.sh --no-docker \
-  --skip-generate          # if files already exist
-
-# Override connection strings
-PG_HOST=myserver PG_PORT=5432 ./scripts/run_all.sh --no-docker
-NEO4J_URI=bolt://myserver:7687 ./scripts/run_all.sh --no-docker
-```
-
-## Sample queries
+## Sample Queries
 
 ### PostgreSQL — Layer 2 & 4
 ```sql
@@ -221,3 +325,30 @@ docker exec -it flowcore-timescaledb psql -U flowcore -d flowcore_ts
 | Layer 2 | PostgreSQL | SourceSystem, SourceRecord, FieldMapping, IdentitySignal, EntityResolutionRule, SyncLog, DeadLetterRecord, KafkaTopic, DiscoveryScanLog |
 | Layer 3 | TimescaleDB | MetricCatalogue, MetricSourceMapping, MetricDatapoint, MetricRollup, MetricBaseline, AlertCatalogue, AlertSourceMapping, AlertEvent, GraphMutationLog, StaleTelemtryEvent, LogEvent |
 | Layer 4 | PostgreSQL | DriftEvent, DriftSuggestion, ClassificationResult, CorrelatedIncident, CapacityForecast, AnomalyFlag, FailureProbability, SimulationScenario, SimulationResult, NodeQualityScore, ItsmIntegrationConfig, User, AuditLogEntry |
+
+---
+
+## Quick Reference
+
+```bash
+# Full startup
+./scripts/container.sh start
+
+# Or with data generation (first run)
+./scripts/run_all.sh
+
+# Check all services
+curl http://localhost:8888/health     # NOC UI
+curl http://localhost:8050/status     # Synthetic Replay
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+```
+
+**Key Files:**
+- `FIXES_SUMMARY.md` — Detailed troubleshooting guide
+- `docker/.env` — Environment configuration
+- `scripts/container.sh` — Container management
+- `scripts/run_all.sh` — Complete bootstrap
+
+---
+
+*FlowCore — Digital Twin Platform for Data Center Infrastructure*
