@@ -65,7 +65,8 @@ def get_producer() -> Producer:
 
 def publish(topic: str, msg: dict, key: Optional[str] = None) -> None:
     payload = json.dumps(msg, default=str).encode()
-    get_producer().produce(topic, value=payload, key=key.encode() if key else None)
+    key_bytes = str(key).encode() if key else None
+    get_producer().produce(topic, value=payload, key=key_bytes)
     state["events_published"] += 1
 
 
@@ -141,7 +142,7 @@ def _make_dcim_message(entity: dict, source: dict, now: str) -> dict:
         "dc_id": entity.get("dc_id"),
         "attributes": [{"namespace": source.get("vendor_name", "dcim"), "key": "sync_ts", "value": now, "value_type": "TIMESTAMP"}],
         "capacity_specs": [{"dimension": "power_kw", "rated_value": round(random.uniform(2, 20), 2), "unit": "kW"}],
-        "identity_signals": [{"signal_type": "ASSET_TAG", "signal_value": f"AT-{entity['entity_id'][:8]}", "confidence": 1.0}],
+        "identity_signals": [{"signal_type": "ASSET_TAG", "signal_value": f"AT-{str(entity['entity_id'])[:8]}", "confidence": 1.0}],
         "relationships": [],
         "event_ts": now,
         "ingest_ts": now,

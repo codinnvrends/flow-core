@@ -93,6 +93,30 @@ services:
     networks:
       - flowcore-net
 
+  # ---------------------------------------------------------------------------
+  # Redpanda Console — Web UI for Kafka topic browsing and management
+  # ---------------------------------------------------------------------------
+  kafka-ui:
+    image: redpandadata/console:latest
+    container_name: flowcore-kafka-ui
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      CONSOLE_CONFIG_FILE: |
+        kafka:
+          brokers: ["kafka:9092"]
+        redpanda:
+          adminApi:
+            enabled: true
+            urls: ["http://kafka:9644"]
+    ports:
+      - "${KAFKA_UI_PORT:-8090}:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - flowcore-net
+
 networks:
   flowcore-net:
     external: true

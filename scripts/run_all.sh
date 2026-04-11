@@ -103,6 +103,75 @@ detect_compose() {
   else err "Neither 'docker compose' nor 'docker-compose' found"; fi
 }
 
+containers_running() {
+  local compose_file="$1"
+  local running_count
+  running_count=$(docker compose -f "$compose_file" ps --format json 2>/dev/null | grep -c '"State":"running"' 2>/dev/null || echo "0")
+  [[ "$running_count" -gt 0 ]]
+}
+
+seed_files_exist() {
+  [[ -f "$OUTPUT_DIR/postgresql_seed.sql" ]] && \
+  [[ -f "$OUTPUT_DIR/timescaledb_seed.sql" ]] && \
+  [[ -f "$OUTPUT_DIR/neo4j_seed.cypher" ]]
+}
+
+pg_has_data() {
+  local ctr="$1" user="$2" db="$3"
+  local count
+  count=$(dexec "$ctr" psql -U "$user" -d "$db" --no-align --tuples-only \
+    -c "SELECT COUNT(*) FROM tenant;" 2>/dev/null || echo "0")
+  count="${count//[[:space:]]/}"
+  [[ "${count:-0}" -gt 0 ]]
+}
+
+ts_has_data() {
+  local ctr="$1" user="$2" db="$3"
+  local count
+  count=$(dexec "$ctr" psql -U "$user" -d "$db" --no-align --tuples-only \
+    -c "SELECT COUNT(*) FROM metric_catalogue;" 2>/dev/null || echo "0")
+  count="${count//[[:space:]]/}"
+  [[ "${count:-0}" -gt 0 ]]
+}
+
+neo4j_has_data() {
+  local ctr="$1"
+  local count
+  count=$(dexec "$ctr" cypher-shell -u neo4j -p flowcore_secret \
+    "MATCH (n) RETURN count(n) AS c;" --format plain 2>/dev/null | tail -1 | tr -d ' ' || echo "0")
+  [[ "${count:-0}" -gt 0 ]]
+}
+
+pg_has_schema() {
+  local ctr="$1" user="$2" db="$3"
+  local count
+  count=$(dexec "$ctr" psql -U "$user" -d "$db" --no-align --tuples-only \
+    -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';" 2>/dev/null || echo "0")
+  count="${count//[[:space:]]/}"
+  [[ "${count:-0}" -gt 0 ]]
+}
+
+ts_has_schema() {
+  local ctr="$1" user="$2" db="$3"
+  local count
+  count=$(dexec "$ctr" psql -U "$user" -d "$db" --no-align --tuples-only \
+    -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';" 2>/dev/null || echo "0")
+  count="${count//[[:space:]]/}"
+  [[ "${count:-0}" -gt 0 ]]
+}
+
+neo4j_has_constraints() {
+  local ctr="$1"
+  local count
+  count=$(dexec "$ctr" cypher-shell -u neo4j -p flowcore_secret \
+    "SHOW CONSTRAINTS YIELD name RETURN count(name) AS c;" --format plain 2>/dev/null | tail -1 | tr -d ' ' || echo "0")
+  [[ "${count:-0}" -gt 0 ]]
+}
+
+platform_running() {
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -q "flowcore-platform\|flowcore-keycloak" 2>/dev/null
+}
+
 wait_for_postgres() {
   local ctr="$1" user="$2" db="$3" label="$4"
   log "Waiting for $label to accept connections..."
@@ -136,19 +205,28 @@ wait_for_neo4j() {
 # STEP 1 — GENERATE SYNTHETIC DATA
 # =============================================================================
 if [[ "$SKIP_GENERATE" == "false" ]]; then
-  hdr "Step 1 -- Generating Synthetic Data"
+  # Check if seed files already exist with content
+  if seed_files_exist; then
+    warn "Seed files already exist — skipping generation (use --skip-generate to bypass this warning)"
+    log "Existing files:"
+    for f in "$OUTPUT_DIR"/*.sql "$OUTPUT_DIR"/*.cypher; do
+      [[ -f "$f" ]] && log "  $(basename "$f")  $(filesize "$f")"
+    done
+  else
+    hdr "Step 1 -- Generating Synthetic Data"
 
-  python3 --version >/dev/null 2>&1 || \
-    err "python3 not found in PATH (required for data generator)"
+    python3 --version >/dev/null 2>&1 || \
+      err "python3 not found in PATH (required for data generator)"
 
-  python3 "$GENERATORS_DIR/generate_all.py" \
-    --days "$DAYS" --devices "$DEVICES" --seed "$SEED"
+    python3 "$GENERATORS_DIR/generate_all.py" \
+      --days "$DAYS" --devices "$DEVICES" --seed "$SEED"
 
-  ok "Generation complete"
-  log "Output files:"
-  for f in "$OUTPUT_DIR"/*.sql "$OUTPUT_DIR"/*.cypher; do
-    [[ -f "$f" ]] && log "  $(basename "$f")  $(filesize "$f")"
-  done
+    ok "Generation complete"
+    log "Output files:"
+    for f in "$OUTPUT_DIR"/*.sql "$OUTPUT_DIR"/*.cypher; do
+      [[ -f "$f" ]] && log "  $(basename "$f")  $(filesize "$f")"
+    done
+  fi
 else
   log "Skipping generation (--skip-generate)"
   for f in postgresql_seed.sql timescaledb_seed.sql neo4j_seed.cypher; do
@@ -171,11 +249,16 @@ if [[ "$USE_DOCKER" == "true" ]]; then
   COMPOSE=$(detect_compose)
   log "Compose command: $COMPOSE"
 
-  $COMPOSE -f "$DOCKER_DIR/docker-compose.yml" pull
-  $COMPOSE -f "$DOCKER_DIR/docker-compose.yml" up -d
-
-  ok "Containers started"
-  $COMPOSE -f "$DOCKER_DIR/docker-compose.yml" ps
+  # Check if containers are already running
+  if containers_running "$DOCKER_DIR/docker-compose.yml"; then
+    warn "Containers already running — skipping docker compose up"
+    $COMPOSE -f "$DOCKER_DIR/docker-compose.yml" ps
+  else
+    $COMPOSE -f "$DOCKER_DIR/docker-compose.yml" pull
+    $COMPOSE -f "$DOCKER_DIR/docker-compose.yml" up -d
+    ok "Containers started"
+    $COMPOSE -f "$DOCKER_DIR/docker-compose.yml" ps
+  fi
 fi
 
 # =============================================================================
@@ -228,50 +311,57 @@ done
 hdr "Step 4 -- Applying Schemas"
 
 # ── PostgreSQL ────────────────────────────────────────────────────────────────
-log "Applying PostgreSQL schema..."
-docker cp "$SCHEMA_DIR/01_postgresql_schema.sql" \
-  "${PG_CONTAINER}:/tmp/flowcore_schema_pg.sql"
-
-if dexec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" \
-     -v ON_ERROR_STOP=1 \
-     -f /tmp/flowcore_schema_pg.sql \
-     > "$OUTPUT_DIR/schema_pg.log" 2>&1; then
-  ok "PostgreSQL schema applied"
+if pg_has_schema "$PG_CONTAINER" "$PG_USER" "$PG_DB"; then
+  warn "PostgreSQL schema already exists — skipping schema application"
 else
-  warn "PostgreSQL schema had errors — check $OUTPUT_DIR/schema_pg.log"
-  grep -i "ERROR" "$OUTPUT_DIR/schema_pg.log" | head -5 || true
+  log "Applying PostgreSQL schema..."
+  docker cp "$SCHEMA_DIR/01_postgresql_schema.sql" \
+    "${PG_CONTAINER}:/tmp/flowcore_schema_pg.sql"
+
+  if dexec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" \
+       -v ON_ERROR_STOP=1 \
+       -f /tmp/flowcore_schema_pg.sql \
+       > "$OUTPUT_DIR/schema_pg.log" 2>&1; then
+    ok "PostgreSQL schema applied"
+  else
+    warn "PostgreSQL schema had errors — check $OUTPUT_DIR/schema_pg.log"
+    grep -i "ERROR" "$OUTPUT_DIR/schema_pg.log" | head -5 || true
+  fi
 fi
 
 # ── TimescaleDB — pass 1: CREATE TABLEs ──────────────────────────────────────
-log "Applying TimescaleDB schema (pass 1 — tables)..."
-docker cp "$SCHEMA_DIR/02_timescaledb_schema.sql" \
-  "${TS_CONTAINER}:/tmp/flowcore_schema_ts.sql"
+if ts_has_schema "$TS_CONTAINER" "$TS_USER" "$TS_DB"; then
+  warn "TimescaleDB schema already exists — skipping schema application"
+else
+  log "Applying TimescaleDB schema (pass 1 — tables)..."
+  docker cp "$SCHEMA_DIR/02_timescaledb_schema.sql" \
+    "${TS_CONTAINER}:/tmp/flowcore_schema_ts.sql"
 
-# No ON_ERROR_STOP here: a transient create_hypertable failure must not
-# prevent the CREATE TABLE statements that follow it from executing.
-dexec "$TS_CONTAINER" psql -U "$TS_USER" -d "$TS_DB" \
-  -f /tmp/flowcore_schema_ts.sql \
-  > "$OUTPUT_DIR/schema_ts_p1.log" 2>&1 || true
+  # No ON_ERROR_STOP here: a transient create_hypertable failure must not
+  # prevent the CREATE TABLE statements that follow it from executing.
+  dexec "$TS_CONTAINER" psql -U "$TS_USER" -d "$TS_DB" \
+    -f /tmp/flowcore_schema_ts.sql \
+    > "$OUTPUT_DIR/schema_ts_p1.log" 2>&1 || true
 
-TABLE_COUNT=$(dexec "$TS_CONTAINER" psql -U "$TS_USER" -d "$TS_DB" \
-  --no-align --tuples-only \
-  -c "SELECT COUNT(*) FROM information_schema.tables
-      WHERE table_schema='public' AND table_type='BASE TABLE';" \
-  2>/dev/null || echo "0")
-TABLE_COUNT="${TABLE_COUNT//[[:space:]]/}"
-log "TimescaleDB tables present after pass 1: ${TABLE_COUNT}"
-[[ "${TABLE_COUNT:-0}" -lt 5 ]] && {
-  warn "Fewer tables than expected — check $OUTPUT_DIR/schema_ts_p1.log"
-  grep -i "ERROR" "$OUTPUT_DIR/schema_ts_p1.log" | head -10 || true
-}
+  TABLE_COUNT=$(dexec "$TS_CONTAINER" psql -U "$TS_USER" -d "$TS_DB" \
+    --no-align --tuples-only \
+    -c "SELECT COUNT(*) FROM information_schema.tables
+        WHERE table_schema='public' AND table_type='BASE TABLE';" \
+    2>/dev/null || echo "0")
+  TABLE_COUNT="${TABLE_COUNT//[[:space:]]/}"
+  log "TimescaleDB tables present after pass 1: ${TABLE_COUNT}"
+  [[ "${TABLE_COUNT:-0}" -lt 5 ]] && {
+    warn "Fewer tables than expected — check $OUTPUT_DIR/schema_ts_p1.log"
+    grep -i "ERROR" "$OUTPUT_DIR/schema_ts_p1.log" | head -10 || true
+  }
 
-# ── TimescaleDB — pass 2: hypertable promotion (retry) ───────────────────────
-# Write the hypertable fragment to OUTPUT_DIR (not /tmp on host) so that
-# docker cp works identically on Windows Git Bash, macOS, and Linux.
-log "Applying TimescaleDB schema (pass 2 — hypertable promotion)..."
+  # ── TimescaleDB — pass 2: hypertable promotion (retry) ───────────────────────
+  # Write the hypertable fragment to OUTPUT_DIR (not /tmp on host) so that
+  # docker cp works identically on Windows Git Bash, macOS, and Linux.
+  log "Applying TimescaleDB schema (pass 2 — hypertable promotion)..."
 
-HYPER_FRAG="$OUTPUT_DIR/flowcore_hypertables.sql"
-cat > "$HYPER_FRAG" << 'HYPERTABLES'
+  HYPER_FRAG="$OUTPUT_DIR/flowcore_hypertables.sql"
+  cat > "$HYPER_FRAG" << 'HYPERTABLES'
 CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
 SELECT create_hypertable('metric_datapoint',     'event_ts',    chunk_time_interval => INTERVAL '7 days',  if_not_exists => TRUE);
 SELECT create_hypertable('metric_rollup',         'window_start',chunk_time_interval => INTERVAL '30 days', if_not_exists => TRUE);
@@ -281,65 +371,75 @@ SELECT create_hypertable('stale_telemetry_event', 'stale_since', chunk_time_inte
 SELECT create_hypertable('log_event',             'event_ts',    chunk_time_interval => INTERVAL '7 days',  if_not_exists => TRUE);
 HYPERTABLES
 
-docker cp "$HYPER_FRAG" "${TS_CONTAINER}:/tmp/flowcore_hypertables.sql"
+  docker cp "$HYPER_FRAG" "${TS_CONTAINER}:/tmp/flowcore_hypertables.sql"
 
-HT_OK=false
-local_attempt=1
-while [[ $local_attempt -le 3 ]]; do
-  log "  Hypertable promotion attempt ${local_attempt}/3..."
-  if dexec "$TS_CONTAINER" psql -U "$TS_USER" -d "$TS_DB" \
-       -f /tmp/flowcore_hypertables.sql \
-       > "$OUTPUT_DIR/schema_ts_hyper_${local_attempt}.log" 2>&1; then
-    HT_OK=true; break
+  HT_OK=false
+  local_attempt=1
+  while [[ $local_attempt -le 3 ]]; do
+    log "  Hypertable promotion attempt ${local_attempt}/3..."
+    if dexec "$TS_CONTAINER" psql -U "$TS_USER" -d "$TS_DB" \
+         -f /tmp/flowcore_hypertables.sql \
+         > "$OUTPUT_DIR/schema_ts_hyper_${local_attempt}.log" 2>&1; then
+      HT_OK=true; break
+    fi
+    grep -i "ERROR" "$OUTPUT_DIR/schema_ts_hyper_${local_attempt}.log" | head -3 || true
+    sleep 5
+    local_attempt=$((local_attempt + 1))
+  done
+
+  if [[ "$HT_OK" == "true" ]]; then
+    ok "TimescaleDB hypertables promoted"
+  else
+    warn "Hypertable promotion had errors — seed will load into regular tables"
   fi
-  grep -i "ERROR" "$OUTPUT_DIR/schema_ts_hyper_${local_attempt}.log" | head -3 || true
-  sleep 5
-  local_attempt=$((local_attempt + 1))
-done
 
-if [[ "$HT_OK" == "true" ]]; then
-  ok "TimescaleDB hypertables promoted"
-else
-  warn "Hypertable promotion had errors — seed will load into regular tables"
-fi
-
-HT_COUNT=$(dexec "$TS_CONTAINER" psql -U "$TS_USER" -d "$TS_DB" \
-  --no-align --tuples-only \
-  -c "SELECT COUNT(*) FROM timescaledb_information.hypertables;" \
-  2>/dev/null || echo "0")
-HT_COUNT="${HT_COUNT//[[:space:]]/}"
-log "Hypertables registered: ${HT_COUNT}"
+  HT_COUNT=$(dexec "$TS_CONTAINER" psql -U "$TS_USER" -d "$TS_DB" \
+    --no-align --tuples-only \
+    -c "SELECT COUNT(*) FROM timescaledb_information.hypertables;" \
+    2>/dev/null || echo "0")
+  HT_COUNT="${HT_COUNT//[[:space:]]/}"
+  log "Hypertables registered: ${HT_COUNT}"
+fi  # End of TimescaleDB schema check
 
 # ── Neo4j constraints ─────────────────────────────────────────────────────────
-log "Applying Neo4j schema constraints..."
-docker cp "$SCHEMA_DIR/03_neo4j_schema.cypher" \
-  "${NEO4J_CONTAINER}:/tmp/flowcore_neo4j_schema.cypher"
-dexec "$NEO4J_CONTAINER" \
-  cypher-shell -u neo4j -p flowcore_secret \
-  --file /tmp/flowcore_neo4j_schema.cypher \
-  > "$OUTPUT_DIR/schema_neo4j.log" 2>&1 || true
-ok "Neo4j constraints applied"
+if neo4j_has_constraints "$NEO4J_CONTAINER"; then
+  warn "Neo4j constraints already exist — skipping schema application"
+else
+  log "Applying Neo4j schema constraints..."
+  docker cp "$SCHEMA_DIR/03_neo4j_schema.cypher" \
+    "${NEO4J_CONTAINER}:/tmp/flowcore_neo4j_schema.cypher"
+  dexec "$NEO4J_CONTAINER" \
+    cypher-shell -u neo4j -p flowcore_secret \
+    --file /tmp/flowcore_neo4j_schema.cypher \
+    > "$OUTPUT_DIR/schema_neo4j.log" 2>&1 || true
+  ok "Neo4j constraints applied"
+fi
 
 # =============================================================================
 # STEP 5 — LOAD POSTGRESQL SEED
 # =============================================================================
 hdr "Step 5 -- Loading PostgreSQL (Layer 2 + Layer 4)"
 
-PG_SEED="$OUTPUT_DIR/postgresql_seed.sql"
-log "Seed: $(filesize "$PG_SEED")"
-log "Copying into container..."
-docker cp "$PG_SEED" "${PG_CONTAINER}:/tmp/flowcore_pg_seed.sql"
-
-log "Running psql..."
-if dexec "$PG_CONTAINER" psql \
-     -U "$PG_USER" -d "$PG_DB" \
-     -v ON_ERROR_STOP=1 \
-     -f /tmp/flowcore_pg_seed.sql \
-     > "$OUTPUT_DIR/load_pg.log" 2>&1; then
-  ok "PostgreSQL seed loaded"
+# Check if data already exists
+if pg_has_data "$PG_CONTAINER" "$PG_USER" "$PG_DB"; then
+  warn "PostgreSQL already has data — skipping seed load"
 else
-  warn "PostgreSQL load had errors — check $OUTPUT_DIR/load_pg.log"
-  grep -i "ERROR" "$OUTPUT_DIR/load_pg.log" | head -10 || true
+  PG_SEED="$OUTPUT_DIR/postgresql_seed.sql"
+  log "Seed: $(filesize "$PG_SEED")"
+  log "Copying into container..."
+  docker cp "$PG_SEED" "${PG_CONTAINER}:/tmp/flowcore_pg_seed.sql"
+
+  log "Running psql..."
+  if dexec "$PG_CONTAINER" psql \
+       -U "$PG_USER" -d "$PG_DB" \
+       -v ON_ERROR_STOP=1 \
+       -f /tmp/flowcore_pg_seed.sql \
+       > "$OUTPUT_DIR/load_pg.log" 2>&1; then
+    ok "PostgreSQL seed loaded"
+  else
+    warn "PostgreSQL load had errors — check $OUTPUT_DIR/load_pg.log"
+    grep -i "ERROR" "$OUTPUT_DIR/load_pg.log" | head -10 || true
+  fi
 fi
 
 log "Row counts:"
@@ -363,21 +463,26 @@ dexec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -c \
 # =============================================================================
 hdr "Step 6 -- Loading TimescaleDB (Layer 3)"
 
-TS_SEED="$OUTPUT_DIR/timescaledb_seed.sql"
-log "Seed: $(filesize "$TS_SEED")"
-log "Copying into container (large file — please wait)..."
-docker cp "$TS_SEED" "${TS_CONTAINER}:/tmp/flowcore_ts_seed.sql"
-
-log "Running psql (may take several minutes for 30-day dataset)..."
-if dexec "$TS_CONTAINER" psql \
-     -U "$TS_USER" -d "$TS_DB" \
-     -v ON_ERROR_STOP=1 \
-     -f /tmp/flowcore_ts_seed.sql \
-     > "$OUTPUT_DIR/load_ts.log" 2>&1; then
-  ok "TimescaleDB seed loaded"
+# Check if data already exists
+if ts_has_data "$TS_CONTAINER" "$TS_USER" "$TS_DB"; then
+  warn "TimescaleDB already has data — skipping seed load"
 else
-  warn "TimescaleDB load had errors — check $OUTPUT_DIR/load_ts.log"
-  grep -i "ERROR" "$OUTPUT_DIR/load_ts.log" | head -10 || true
+  TS_SEED="$OUTPUT_DIR/timescaledb_seed.sql"
+  log "Seed: $(filesize "$TS_SEED")"
+  log "Copying into container (large file — please wait)..."
+  docker cp "$TS_SEED" "${TS_CONTAINER}:/tmp/flowcore_ts_seed.sql"
+
+  log "Running psql (may take several minutes for 30-day dataset)..."
+  if dexec "$TS_CONTAINER" psql \
+       -U "$TS_USER" -d "$TS_DB" \
+       -v ON_ERROR_STOP=1 \
+       -f /tmp/flowcore_ts_seed.sql \
+       > "$OUTPUT_DIR/load_ts.log" 2>&1; then
+    ok "TimescaleDB seed loaded"
+  else
+    warn "TimescaleDB load had errors — check $OUTPUT_DIR/load_ts.log"
+    grep -i "ERROR" "$OUTPUT_DIR/load_ts.log" | head -10 || true
+  fi
 fi
 
 log "Row counts:"
@@ -405,20 +510,25 @@ dexec "$TS_CONTAINER" psql -U "$TS_USER" -d "$TS_DB" \
 # =============================================================================
 hdr "Step 7 -- Loading Neo4j (Layer 1)"
 
-NEO4J_SEED="$OUTPUT_DIR/neo4j_seed.cypher"
-log "Seed: $(filesize "$NEO4J_SEED")"
-log "Copying into container..."
-docker cp "$NEO4J_SEED" "${NEO4J_CONTAINER}:/tmp/flowcore_neo4j_seed.cypher"
-
-log "Running cypher-shell (may take a few minutes)..."
-if dexec "$NEO4J_CONTAINER" \
-     cypher-shell -u neo4j -p flowcore_secret \
-     --file /tmp/flowcore_neo4j_seed.cypher \
-     > "$OUTPUT_DIR/load_neo4j.log" 2>&1; then
-  ok "Neo4j seed loaded"
+# Check if data already exists
+if neo4j_has_data "$NEO4J_CONTAINER"; then
+  warn "Neo4j already has data — skipping seed load"
 else
-  warn "Neo4j load had warnings — check $OUTPUT_DIR/load_neo4j.log"
-  grep -i "^.*ERROR" "$OUTPUT_DIR/load_neo4j.log" | head -10 || true
+  NEO4J_SEED="$OUTPUT_DIR/neo4j_seed.cypher"
+  log "Seed: $(filesize "$NEO4J_SEED")"
+  log "Copying into container..."
+  docker cp "$NEO4J_SEED" "${NEO4J_CONTAINER}:/tmp/flowcore_neo4j_seed.cypher"
+
+  log "Running cypher-shell (may take a few minutes)..."
+  if dexec "$NEO4J_CONTAINER" \
+       cypher-shell -u neo4j -p flowcore_secret \
+       --file /tmp/flowcore_neo4j_seed.cypher \
+       > "$OUTPUT_DIR/load_neo4j.log" 2>&1; then
+    ok "Neo4j seed loaded"
+  else
+    warn "Neo4j load had warnings — check $OUTPUT_DIR/load_neo4j.log"
+    grep -i "^.*ERROR" "$OUTPUT_DIR/load_neo4j.log" | head -10 || true
+  fi
 fi
 
 log "Node counts:"
@@ -462,8 +572,13 @@ if [[ "$USE_DOCKER" == "true" ]]; then
   # Now that all stores are seeded we can safely bring up the rest of the stack.
   # =============================================================================
   hdr "Step 9 -- Launching full platform stack"
-  log "Starting platform services (Keycloak + ingestion + processing)..."
-  "$SCRIPT_DIR/stack.sh" up --no-replay
+
+  if platform_running; then
+    warn "Platform services already running — skipping stack launch"
+  else
+    log "Starting platform services (Keycloak + ingestion + processing)..."
+    "$SCRIPT_DIR/stack.sh" up --no-replay
+  fi
 fi
 
 ok "FlowCore persistent stores are ready."

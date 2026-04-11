@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Python deps for all 6 platform services
-RUN pip install --no-cache-dir \
+RUN pip install --no-cache-dir --timeout 300 \
     fastapi==0.111.0 \
     "uvicorn[standard]==0.30.0" \
     pydantic==2.7.0 \
