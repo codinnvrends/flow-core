@@ -1,0 +1,31 @@
+# =============================================================================
+# FlowCore Git Attributes
+# =============================================================================
+
+# Ignore whitespace differences in diffs for common file types
+*.py    diff=ignore-space-at-eol
+*.js    diff=ignore-space-at-eol
+*.ts    diff=ignore-space-at-eol
+*.tsx   diff=ignore-space-at-eol
+*.jsx   diff=ignore-space-at-eol
+*.json  diff=ignore-space-at-eol
+*.yml   diff=ignore-space-at-eol
+*.yaml  diff=ignore-space-at-eol
+*.md    diff=ignore-space-at-eol
+*.sh    diff=ignore-space-at-eol
+*.sql   diff=ignore-space-at-eol
+*.cypher diff=ignore-space-at-eol
+
+# Treat all files as text with LF line endings
+* text=auto eol=lf
+
+# Binary files (no diff)
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.zip   binary
+*.tar   binary
+*.gz    binary
