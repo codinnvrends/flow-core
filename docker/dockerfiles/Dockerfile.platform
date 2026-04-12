@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget curl ca-certificates supervisor default-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip and install core build tools first (required for opentelemetry)
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 # Python deps for all 6 platform services
 RUN pip install --no-cache-dir --timeout 300 \
     fastapi==0.111.0 \
@@ -21,7 +24,14 @@ RUN pip install --no-cache-dir --timeout 300 \
     asyncpg==0.29.0 \
     neo4j==5.20.0 \
     httpx==0.27.0 \
-    python-dotenv==1.0.1
+    python-dotenv==1.0.1 \
+    opentelemetry-api==1.25.0 \
+    opentelemetry-sdk==1.25.0 \
+    opentelemetry-exporter-otlp==1.25.0 \
+    opentelemetry-instrumentation==0.46b0 \
+    opentelemetry-instrumentation-logging==0.46b0 \
+    opentelemetry-instrumentation-fastapi==0.46b0 \
+    opentelemetry-instrumentation-asyncpg==0.46b0
 
 # Keycloak
 ENV KC_VERSION=24.0.4
@@ -38,6 +48,9 @@ RUN mkdir -p \
     /app/graph-updater /app/timeseries-writer /app/event-archive \
     /var/log/supervisord /tmp/flowcore-archive \
     /opt/keycloak/data/import
+
+# Copy shared telemetry module first (needed by all services)
+COPY services/telemetry.py /app/telemetry.py
 
 COPY services/dcim-ingestion/    /app/dcim-ingestion/
 COPY services/telemetry-gateway/ /app/telemetry-gateway/

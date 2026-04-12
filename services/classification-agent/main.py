@@ -6,6 +6,16 @@ Produces: classification.results (Kafka)
 Writes:   classification_result to PostgreSQL, device type + capabilities to Neo4j
 MLflow:   tracks model runs and stores trained models
 """
+import sys
+import os
+# Add parent directory to path for shared telemetry module
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import telemetry
+
+# Setup OpenTelemetry for SigNoz (must be before other imports)
+tracer = telemetry.setup_telemetry("classification-agent")
+
+
 import json
 import logging
 import os
@@ -25,7 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
 from pydantic import BaseModel
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("classification-agent")
 
 KAFKA_BROKERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
@@ -490,6 +500,9 @@ def consumer_thread():
 
 # ── FastAPI ───────────────────────────────────────────────────────────────────
 app = FastAPI(title="FlowCore Classification Agent", version="1.0.0")
+
+# Instrument FastAPI for automatic tracing
+telemetry.instrument_fastapi(app, tracer)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 

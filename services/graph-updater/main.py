@@ -6,6 +6,17 @@ Consumes: dcim.config.normalized, metrics.timeseries.raw, alerts.raw,
 Writes:   Neo4j (entities + relationships), graph.mutations Kafka topic
 Performs: Entity resolution using entity_resolution_rule from PostgreSQL
 """
+import sys
+import os
+# Add parent directory to path for shared telemetry module
+sys.path.insert(0, "/app")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import telemetry
+
+# Setup OpenTelemetry for SigNoz (must be before other imports)
+tracer = telemetry.setup_telemetry("graph-updater")
+
+
 import asyncio
 import json
 import logging
@@ -413,6 +424,9 @@ def consumer_thread():
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(title="FlowCore Graph Updater", version="1.0.0")
+
+# Instrument FastAPI for automatic tracing
+telemetry.instrument_fastapi(app, tracer)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 

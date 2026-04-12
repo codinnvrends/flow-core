@@ -40,6 +40,10 @@ services:
       # Keycloak runs inside the platform container, reachable by its service name
       JWT_ISSUER: "http://platform:8080/realms/${KEYCLOAK_REALM:-flowcore}"
       JWT_AUDIENCE: "${KEYCLOAK_CLIENT_ID:-flowcore-app}"
+      # OpenTelemetry configuration for SigNoz
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://signoz-otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_RESOURCE_ATTRIBUTES: service.name=flowcore-api-ui,deployment.environment=development,service.namespace=flowcore,host.name=api-ui
     ports:
       # Single nginx proxy port — all traffic enters here
       - "${API_GATEWAY_PORT:-8888}:8888"

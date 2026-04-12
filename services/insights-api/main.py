@@ -4,6 +4,16 @@ Phase 1 scope: drift events and classification results.
 REST endpoints consumed by the NOC frontend.
 Port: 4001
 """
+import sys
+import os
+# Add parent directory to path for shared telemetry module
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import telemetry
+
+# Setup OpenTelemetry for SigNoz (must be before other imports)
+tracer = telemetry.setup_telemetry("insights-api")
+
+
 import logging
 import os
 from datetime import datetime, timezone
@@ -14,7 +24,7 @@ import uvicorn
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("insights-api")
 
 PG_DSN = f"postgresql://{os.getenv('PG_USER','flowcore')}:{os.getenv('PG_PASSWORD','flowcore_secret')}@{os.getenv('PG_HOST','postgres')}:{os.getenv('PG_PORT','5432')}/{os.getenv('PG_DB','flowcore')}"
@@ -23,6 +33,9 @@ PORT = int(os.getenv("INSIGHTS_API_INTERNAL_PORT", "4001"))
 _pool: Optional[asyncpg.Pool] = None
 
 app = FastAPI(title="FlowCore Insights API", version="1.0.0")
+
+# Instrument FastAPI for automatic tracing
+telemetry.instrument_fastapi(app, tracer)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 

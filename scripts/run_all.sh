@@ -1,3 +1,6 @@
+
+
+
 #!/usr/bin/env bash
 # =============================================================================
 # FlowCore — Full Bootstrap Script
@@ -45,9 +48,18 @@ hdr()  {
   echo -e "======================================================${NC}\n"
 }
 
+# ── Python Interpreter Detection ─────────────────────────────────────────────
+if command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
+  PYTHON="python"
+elif command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
+  PYTHON="python3"
+else
+  err "Python not found in PATH"
+fi
+
 # ── Cross-platform file size (avoids du -h field-separator differences) ───────
 filesize() {
-  python3 -c "
+  "$PYTHON" -c "
 import os, sys
 b = os.path.getsize(sys.argv[1])
 for unit in ['B','KB','MB','GB']:
@@ -215,10 +227,10 @@ if [[ "$SKIP_GENERATE" == "false" ]]; then
   else
     hdr "Step 1 -- Generating Synthetic Data"
 
-    python3 --version >/dev/null 2>&1 || \
-      err "python3 not found in PATH (required for data generator)"
+    "$PYTHON" --version >/dev/null 2>&1 || \
+      err "Python (3.x) not found or not working (required for data generator)"
 
-    python3 "$GENERATORS_DIR/generate_all.py" \
+    "$PYTHON" "$GENERATORS_DIR/generate_all.py" \
       --days "$DAYS" --devices "$DEVICES" --seed "$SEED"
 
     ok "Generation complete"
@@ -577,7 +589,7 @@ if [[ "$USE_DOCKER" == "true" ]]; then
     warn "Platform services already running — skipping stack launch"
   else
     log "Starting platform services (Keycloak + ingestion + processing)..."
-    "$SCRIPT_DIR/stack.sh" up --no-replay
+    "$SCRIPT_DIR/stack.sh" up
   fi
 fi
 

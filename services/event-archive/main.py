@@ -3,6 +3,17 @@ FlowCore Event Archive Service
 Consumes from all major Kafka topics and writes time-partitioned
 compressed JSON batches to S3-compatible object store (or local filesystem).
 """
+import sys
+import os
+# Add parent directory to path for shared telemetry module
+sys.path.insert(0, "/app")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import telemetry
+
+# Setup OpenTelemetry for SigNoz (must be before other imports)
+tracer = telemetry.setup_telemetry("event-archive")
+
+
 import gzip
 import json
 import logging
@@ -106,6 +117,9 @@ def consumer_thread():
 
 
 app = FastAPI(title="FlowCore Event Archive", version="1.0.0")
+
+# Instrument FastAPI for automatic tracing
+telemetry.instrument_fastapi(app, tracer)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 

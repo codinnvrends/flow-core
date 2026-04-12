@@ -1,0 +1,90 @@
+<?xml version="1.0"?>
+<!--
+  FlowCore — SigNoz ClickHouse Configuration
+  
+  Overrides for ClickHouse server to support SigNoz telemetry storage.
+-->
+<clickhouse>
+    <logger>
+        <level>information</level>
+        <console>true</console>
+    </logger>
+
+    <!-- Zookeeper configuration for SigNoz replication -->
+    <zookeeper>
+        <node index="1">
+            <host>signoz-zookeeper-1</host>
+            <port>2181</port>
+        </node>
+    </zookeeper>
+
+    <!-- MergeTree settings optimized for time-series telemetry -->
+    <merge_tree>
+        <min_bytes_for_wide_part>10485760</min_bytes_for_wide_part>
+        <min_rows_for_wide_part>0</min_rows_for_wide_part>
+    </merge_tree>
+
+    <!-- Storage configuration for traces, metrics, logs -->
+    <storage_configuration>
+        <disks>
+            <default>
+                <keep_free_space_bytes>10485760</keep_free_space_bytes>
+            </default>
+        </disks>
+        <policies>
+            <default>
+                <volumes>
+                    <default>
+                        <disk>default</disk>
+                    </default>
+                </volumes>
+            </default>
+        </policies>
+    </storage_configuration>
+
+    <!-- User-defined functions for histogram calculations -->
+    <user_defined_executable_functions>
+        <function>
+            <type>executable_pool</type>
+            <name>histogramQuantile</name>
+            <command>histogramQuantile</command>
+            <format>JSONEachRow</format>
+            <return_type>Float64</return_type>
+            <argument>
+                <type>Array(Float64)</type>
+                <name>buckets</name>
+            </argument>
+            <argument>
+                <type>Array(UInt64)</type>
+                <name>counts</name>
+            </argument>
+            <argument>
+                <type>Float64</type>
+                <name>quantile</name>
+            </argument>
+            <send_chunk_header>true</send_chunk_header>
+            <pool_size>8</pool_size>
+            <command_termination_timeout>10</command_termination_timeout>
+            <max_command_execution_time>10</max_command_execution_time>
+        </function>
+    </user_defined_executable_functions>
+
+    <!-- Enable SQL user-defined functions -->
+    <allow_sql_user_defined_functions>true</allow_sql_user_defined_functions>
+
+    <!-- Query cache for repeated SigNoz queries -->
+    <query_cache>
+        <max_size_in_bytes>1073741824</max_size_in_bytes>
+        <max_entries>1024</max_entries>
+        <shared>true</shared>
+    </query_cache>
+
+    <!-- Compression -->
+    <compression>
+        <case>
+            <min_part_size>10000000000</min_part_size>
+            <min_part_size_ratio>0.01</min_part_size_ratio>
+            <method>zstd</method>
+        </case>
+    </compression>
+</clickhouse>

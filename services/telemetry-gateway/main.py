@@ -6,6 +6,17 @@ Inbound paths:
   POST /metrics      → Generic metrics JSON endpoint
 Publishes to: metrics.timeseries.raw, alerts.raw, events.raw
 """
+import sys
+import os
+# Add parent directory to path for shared telemetry module
+sys.path.insert(0, "/app")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import telemetry
+
+# Setup OpenTelemetry for SigNoz (must be before other imports)
+tracer = telemetry.setup_telemetry("telemetry-gateway")
+
+
 import json
 import logging
 import os
@@ -123,6 +134,9 @@ def make_metric_msg(entity_id: str, entity_class: str, metric_id: str,
 
 # ── FastAPI ───────────────────────────────────────────────────────────────────
 app = FastAPI(title="FlowCore Telemetry Gateway", version="1.0.0")
+
+# Instrument FastAPI for automatic tracing
+telemetry.instrument_fastapi(app, tracer)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 

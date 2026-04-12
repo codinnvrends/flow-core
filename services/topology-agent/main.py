@@ -6,6 +6,16 @@ Produces: drift.events, drift.suggestions
 Writes:   drift_event + drift_suggestion to PostgreSQL
           proposed-namespace annotations to Neo4j (not live graph)
 """
+import sys
+import os
+# Add parent directory to path for shared telemetry module
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import telemetry
+
+# Setup OpenTelemetry for SigNoz (must be before other imports)
+tracer = telemetry.setup_telemetry("topology-agent")
+
+
 import asyncio
 import json
 import logging
@@ -22,7 +32,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("topology-agent")
 
 KAFKA_BROKERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
@@ -299,6 +309,9 @@ def consumer_thread():
 
 # ── FastAPI ───────────────────────────────────────────────────────────────────
 app = FastAPI(title="FlowCore Topology Reconciliation Agent", version="1.0.0")
+
+# Instrument FastAPI for automatic tracing
+telemetry.instrument_fastapi(app, tracer)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 

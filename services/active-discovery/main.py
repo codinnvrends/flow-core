@@ -4,6 +4,17 @@ Executes scheduled SNMP walks and IPMI/Redfish probes.
 Publishes to: discovery.snmp.results, discovery.bmc.results
 Admin REST API on :8003
 """
+import sys
+import os
+# Add parent directory to path for shared telemetry module
+sys.path.insert(0, "/app")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import telemetry
+
+# Setup OpenTelemetry for SigNoz (must be before other imports)
+tracer = telemetry.setup_telemetry("active-discovery")
+
+
 import asyncio
 import json
 import logging
@@ -226,6 +237,9 @@ def scheduler_thread():
 
 # ── FastAPI ───────────────────────────────────────────────────────────────────
 app = FastAPI(title="FlowCore Active Discovery", version="1.0.0")
+
+# Instrument FastAPI for automatic tracing
+telemetry.instrument_fastapi(app, tracer)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 

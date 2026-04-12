@@ -3,6 +3,16 @@ FlowCore Synthetic Replay Service
 Reads from seeded PostgreSQL + TimescaleDB, publishes to all 5 Kafka topics.
 Modes: live (continuous generation) | historical (30-day seed replay)
 """
+import sys
+import os
+# Add parent directory to path for shared telemetry module
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import telemetry
+
+# Setup OpenTelemetry for SigNoz (must be before other imports)
+tracer = telemetry.setup_telemetry("synthetic-replay")
+
+
 import asyncio
 import json
 import logging
@@ -21,7 +31,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("synthetic-replay")
 
 # ── Config from env ───────────────────────────────────────────────────────────
@@ -437,6 +447,9 @@ def stop_replay():
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(title="FlowCore Synthetic Replay", version="1.0.0")
+
+# Instrument FastAPI for automatic tracing
+telemetry.instrument_fastapi(app, tracer)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 

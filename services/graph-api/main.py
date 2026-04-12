@@ -5,6 +5,16 @@ Queries Neo4j for entity/relationship graph data.
 Reads TimescaleDB for metric history.
 Port: 4000
 """
+import sys
+import os
+# Add parent directory to path for shared telemetry module
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import telemetry
+
+# Setup OpenTelemetry for SigNoz (must be before other imports)
+tracer = telemetry.setup_telemetry("graph-api")
+
+
 import asyncio
 import json
 import logging
@@ -22,7 +32,7 @@ from strawberry.fastapi import GraphQLRouter
 from strawberry.subscriptions import GRAPHQL_TRANSPORT_WS_PROTOCOL, GRAPHQL_WS_PROTOCOL
 from strawberry.types import Info
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("graph-api")
 
 NEO4J_URI = f"bolt://{os.getenv('NEO4J_HOST','neo4j')}:{os.getenv('NEO4J_BOLT_PORT','7687')}"
@@ -286,6 +296,9 @@ graphql_app = GraphQLRouter(
 )
 
 app = FastAPI(title="FlowCore Graph API", version="1.0.0")
+
+# Instrument FastAPI for automatic tracing
+telemetry.instrument_fastapi(app, tracer)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"], allow_credentials=True)
 app.include_router(graphql_app, prefix="/graphql")

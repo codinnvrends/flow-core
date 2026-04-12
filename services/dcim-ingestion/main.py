@@ -9,10 +9,19 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+
+# Add parent directory to path for shared telemetry module
+sys.path.insert(0, "/app")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import telemetry
+
+# Setup OpenTelemetry for SigNoz (must be before other imports)
+tracer = telemetry.setup_telemetry("dcim-ingestion")
 
 import asyncpg
 import uvicorn
@@ -21,7 +30,6 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("dcim-ingestion")
 
 KAFKA_BROKERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
@@ -280,6 +288,9 @@ async def run_sync(source_id: str) -> dict:
 # ── FastAPI ───────────────────────────────────────────────────────────────────
 app = FastAPI(title="FlowCore DCIM Ingestion", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Instrument FastAPI for automatic tracing
+telemetry.instrument_fastapi(app, tracer)
 
 
 @app.on_event("startup")

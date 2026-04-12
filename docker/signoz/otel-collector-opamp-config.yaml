@@ -1,0 +1,28 @@
+# =============================================================================
+# FlowCore — SigNoz OTel Collector OpAMP Configuration
+#
+# OpAMP (Open Agent Management Protocol) configuration for remote management.
+# For FlowCore, we use standalone mode without remote management.
+# =============================================================================
+
+server:
+  endpoint: ws://signoz:4320/v1/opamp
+  headers:
+    signoz-cluster-name: flowcore-cluster
+    signoz-api-key: ${env:SIGNOZ_API_KEY:-}
+
+capabilities:
+  reportsEffectiveConfig: true
+  reportsOwnMetrics: true
+  reportsOwnLogs: true
+  reportsOwnTraces: true
+  reportsHealth: true
+  acceptsRemoteConfig: true
+  reportsRemoteConfigStatus: true
+  acceptsRestartCommand: true
+
+agent:
+  executable: /signoz-otel-collector
+
+storage:
+  directory: /var/lib/signoz-otel-collector
