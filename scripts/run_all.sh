@@ -299,6 +299,7 @@ done
 # (where Git Bash would translate it to a Windows Temp path).
 #
 # PostgreSQL: standard SQL, no extensions. ON_ERROR_STOP=1 is safe.
+#   Schema includes all base tables + generated_report (NOC GUI v2).
 #
 # TimescaleDB: two-pass approach.
 #   Pass 1 — CREATE TABLE (without ON_ERROR_STOP so a transient hypertable
@@ -323,6 +324,12 @@ else
        -f /tmp/flowcore_schema_pg.sql \
        > "$OUTPUT_DIR/schema_pg.log" 2>&1; then
     ok "PostgreSQL schema applied"
+    # Verify generated_report table was created (NOC GUI v2)
+    GR_EXISTS=$(dexec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" --no-align --tuples-only \
+      -c "SELECT to_regclass('public.generated_report')::text;" 2>/dev/null | tr -d ' ')
+    [[ "$GR_EXISTS" == "generated_report" ]] \
+      && ok "generated_report table present" \
+      || warn "generated_report table missing — check 01_postgresql_schema.sql"
   else
     warn "PostgreSQL schema had errors — check $OUTPUT_DIR/schema_pg.log"
     grep -i "ERROR" "$OUTPUT_DIR/schema_pg.log" | head -5 || true
@@ -455,6 +462,7 @@ dexec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -c \
    UNION ALL SELECT 'anomaly_flag',              COUNT(*) FROM anomaly_flag
    UNION ALL SELECT 'failure_probability',       COUNT(*) FROM failure_probability
    UNION ALL SELECT 'simulation_result',         COUNT(*) FROM simulation_result
+   UNION ALL SELECT 'generated_report',          COUNT(*) FROM generated_report
    UNION ALL SELECT 'audit_log_entry',           COUNT(*) FROM audit_log_entry
    ORDER BY 1;" 2>/dev/null || warn "Row count query failed"
 
@@ -576,8 +584,8 @@ if [[ "$USE_DOCKER" == "true" ]]; then
   if platform_running; then
     warn "Platform services already running — skipping stack launch"
   else
-    log "Starting platform services (Keycloak + ingestion + processing)..."
-    "$SCRIPT_DIR/stack.sh" up --no-replay
+    log "Starting platform services (Keycloak + ingestion + processing + replay)..."
+    "$SCRIPT_DIR/stack.sh" up
   fi
 fi
 

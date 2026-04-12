@@ -1,89 +1,98 @@
-import React, { useState } from 'react'
-import { Routes, Route, Link, useLocation } from 'react-router-dom'
-import {
-  Box, AppBar, Toolbar, Typography, Tabs, Tab, Chip,
-  IconButton, Tooltip, CircularProgress,
-} from '@mui/material'
-import {
-  GridView as GridIcon,
-  BugReport as DriftIcon,
-  DeviceHub as ClassIcon,
-  Refresh as RefreshIcon,
-} from '@mui/icons-material'
-import RackHealthGrid from './pages/RackHealthGrid'
+/**
+ * App.tsx — FlowCore NOC v2
+ * New layout: fixed 260px sidebar + 64px top bar + content area.
+ * Replaces the old tab-based layout entirely.
+ */
+import React, { useEffect } from 'react'
+import { Routes, Route } from 'react-router-dom'
+import { ThemeProvider, CssBaseline } from '@mui/material'
+import { ApolloProvider } from '@apollo/client'
+
+import { nocTheme } from './lib/theme'
+import { apolloClient } from './lib/apollo'
+import { setTenant } from './lib/api'
+
+import Sidebar from './components/layout/Sidebar'
+import TopBar  from './components/layout/TopBar'
+
+import Dashboard      from './pages/Dashboard'
+import ThermalFlow    from './pages/ThermalFlow'
+import PowerFlow      from './pages/PowerFlow'
+import Analytics      from './pages/Analytics'
+import Alerts         from './pages/Alerts'
+import Reports        from './pages/Reports'
+import DriftHygiene   from './pages/DriftHygiene'
+import Classification from './pages/Classification'
+import { ScenarioPlanning, Settings, Integrations, Security } from './pages/stubs'
+
+// Keep RackDetail accessible as a drill-down from the heatmap
 import RackDetail from './pages/RackDetail'
-import DriftDashboard from './pages/DriftDashboard'
-import ClassificationReview from './pages/ClassificationReview'
 
-const TENANT_ID = import.meta.env.VITE_DEFAULT_TENANT_ID || '48041f5f-cba7-466e-807a-b2fe85bd20ae'
+const TENANT_ID = import.meta.env.VITE_DEFAULT_TENANT_ID || '25cb8c81-57ed-4d85-9c79-00168e8cb3cc'
 
-const NAV_TABS = [
-  { path: '/',              label: 'Rack Health',   icon: <GridIcon fontSize="small" /> },
-  { path: '/drift',         label: 'Drift & Hygiene', icon: <DriftIcon fontSize="small" /> },
-  { path: '/classification', label: 'Classification', icon: <ClassIcon fontSize="small" /> },
-]
+// Lightweight hook to read live alert count for sidebar badge + topbar
+function useAlertCount(): number {
+  const [count, setCount] = React.useState(0)
+  useEffect(() => {
+    // Initial fetch
+    fetch(`/api/alerts?tenant_id=${TENANT_ID}`)
+      .then(r => r.json())
+      .then(d => setCount(d?.counts?.critical ?? 0))
+      .catch(() => setCount(7)) // mock fallback
+
+    // Poll every 60s
+    const id = setInterval(() => {
+      fetch(`/api/alerts?tenant_id=${TENANT_ID}`)
+        .then(r => r.json())
+        .then(d => setCount(d?.counts?.critical ?? 0))
+        .catch(() => {})
+    }, 60000)
+    return () => clearInterval(id)
+  }, [])
+  return count
+}
 
 export default function App() {
-  const location = useLocation()
-  const activeTab = NAV_TABS.findIndex(t =>
-    t.path === '/' ? location.pathname === '/' : location.pathname.startsWith(t.path)
-  )
+  // Inject tenant_id into all API calls at startup
+  useEffect(() => { setTenant(TENANT_ID) }, [])
+
+  const alertCount = useAlertCount()
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', bgcolor: 'background.default' }}>
-      {/* ── Top bar ── */}
-      <AppBar position="static" elevation={0}
-              sx={{ bgcolor: '#0D1B2A', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        <Toolbar variant="dense" sx={{ gap: 2 }}>
-          {/* Logo */}
-          <Typography variant="h4" sx={{ fontWeight: 700, color: '#0891B2', mr: 1, letterSpacing: '-0.5px' }}>
-            FlowCore
-          </Typography>
-          <Chip label="NOC" size="small"
-                sx={{ bgcolor: 'rgba(8,145,178,0.15)', color: '#0891B2', fontWeight: 700, fontSize: '0.65rem' }} />
-          <Box sx={{ flex: 1 }} />
-          <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-            Tenant: {TENANT_ID.slice(0, 8)}…
-          </Typography>
-          <Chip label="LIVE" size="small"
-                sx={{ bgcolor: 'rgba(5,150,105,0.2)', color: '#059669', fontSize: '0.65rem', fontWeight: 700,
-                      animation: 'pulse 2s infinite',
-                      '@keyframes pulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.6 } } }} />
-        </Toolbar>
+    <ApolloProvider client={apolloClient}>
+      <ThemeProvider theme={nocTheme}>
+        <CssBaseline />
 
-        {/* Nav tabs */}
-        <Tabs value={activeTab >= 0 ? activeTab : 0}
-              sx={{ px: 2, minHeight: 40,
-                    '& .MuiTab-root': { minHeight: 40, fontSize: '0.78rem', py: 0 },
-                    '& .MuiTabs-indicator': { bgcolor: '#0891B2', height: 2 } }}>
-          {NAV_TABS.map((tab) => (
-            <Tab key={tab.path}
-                 component={Link} to={tab.path}
-                 icon={tab.icon} iconPosition="start"
-                 label={tab.label} />
-          ))}
-        </Tabs>
-      </AppBar>
+        {/* Fixed sidebar */}
+        <Sidebar alertCount={alertCount} />
 
-      {/* ── Page content ── */}
-      <Box sx={{ flex: 1, overflow: 'auto' }}>
+        {/* Fixed top bar */}
+        <TopBar
+          facilityName="FlowCore EU-West Alpha"
+          pocStatus="POC — Day 42 / 90"
+          onTrack={true}
+          alertCount={alertCount}
+          pue={1.43}
+        />
+
+        {/* Page content — offset left + top */}
         <Routes>
-          <Route path="/"                element={<RackHealthGrid tenantId={TENANT_ID} />} />
-          <Route path="/rack/:entityId"  element={<RackDetail tenantId={TENANT_ID} />} />
-          <Route path="/drift"           element={<DriftDashboard tenantId={TENANT_ID} />} />
-          <Route path="/classification"  element={<ClassificationReview tenantId={TENANT_ID} />} />
+          <Route path="/"               element={<Dashboard />} />
+          <Route path="/thermal"        element={<ThermalFlow />} />
+          <Route path="/power"          element={<PowerFlow />} />
+          <Route path="/analytics"      element={<Analytics />} />
+          <Route path="/alerts"         element={<Alerts />} />
+          <Route path="/reports"        element={<Reports />} />
+          <Route path="/scenarios"      element={<ScenarioPlanning />} />
+          <Route path="/settings"       element={<Settings />} />
+          <Route path="/integrations"   element={<Integrations />} />
+          <Route path="/security"       element={<Security />} />
+          <Route path="/drift"          element={<DriftHygiene />} />
+          <Route path="/classification" element={<Classification />} />
+          {/* Rack detail — drill-down from heatmap */}
+          <Route path="/rack/:entityId" element={<RackDetail tenantId={TENANT_ID} />} />
         </Routes>
-      </Box>
-
-      {/* ── Status bar ── */}
-      <Box sx={{ px: 2, py: 0.5, borderTop: '1px solid rgba(255,255,255,0.05)',
-                 display: 'flex', gap: 2, alignItems: 'center' }}>
-        <Typography variant="caption">FlowCore v1.0.0</Typography>
-        <Box sx={{ flex: 1 }} />
-        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-          {new Date().toISOString().slice(0, 19).replace('T', ' ')} UTC
-        </Typography>
-      </Box>
-    </Box>
+      </ThemeProvider>
+    </ApolloProvider>
   )
 }

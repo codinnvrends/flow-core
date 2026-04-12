@@ -132,6 +132,12 @@ METRIC_DEFS = [
     ('bandwidth_utilisation_pct',    'NETWORK',     'GAUGE',   '%',    'AVG',  70.0, 90.0),
     ('error_count',                  'COMPUTE',     'COUNTER', 'count','SUM',  10.0, 50.0),
     ('packet_loss_pct',              'NETWORK',     'GAUGE',   '%',    'AVG',   1.0,  5.0),
+    # NOC GUI v2 — derived/computed metrics for Dashboard, ThermalFlow, PowerFlow
+    ('pue',                          'POWER',       'GAUGE',   'ratio','AVG',  1.6,  2.0),
+    ('humidity_pct',                 'ENVIRONMENTAL','GAUGE',  '%',    'AVG',  60.0, 70.0),
+    ('cooling_efficiency_pct',       'COOLING',     'GAUGE',   '%',    'AVG',  70.0, 50.0),
+    ('ups_load_pct',                 'POWER',       'GAUGE',   '%',    'AVG',  80.0, 95.0),
+    ('energy_cost_eur_today',        'POWER',       'COUNTER', 'EUR',  'SUM',  None, None),
 ]
 
 ALERT_DEFS = [
@@ -319,6 +325,18 @@ for t in TENANTS:
         ('alerting',          'correlation_window_s',          '300',  'INTEGER', 'Temporal window for M3 alert clustering (seconds)'),
         ('data_quality',      'completeness_warn_threshold',   '0.70', 'FLOAT',  'NODE_QUALITY_SCORE completeness below this triggers DQ warning'),
         ('simulation',        'max_execution_ms',              '10000','INTEGER', 'NFR-04: max what-if simulation wall-clock time (milliseconds)'),
+        # NOC GUI v2 — POC period, benchmarks, power tariff, cooling controls, peak hours
+        ('poc',      'period_start',          '2025-01-15', 'STRING',  'POC period start date shown on Dashboard context card'),
+        ('poc',      'period_end',            '2025-04-15', 'STRING',  'POC period end date shown on Dashboard context card'),
+        ('poc',      'on_track',              'true',       'BOOLEAN', 'Whether POC is on track — controls Dashboard On Track badge'),
+        ('poc',      'pue_target',            '1.20',       'FLOAT',   'Target PUE for POC — used in Dashboard KPI delta badge'),
+        ('analytics','industry_avg_pue',      '1.58',       'FLOAT',   'Industry average PUE benchmark for Analytics chart'),
+        ('power',    'energy_tariff_eur_kwh', '0.16',       'FLOAT',   'Energy tariff EUR/kWh for PowerFlow energy cost calculation'),
+        ('thermal',  'auto_optimise',         'true',       'BOOLEAN', 'Auto-optimise cooling toggle — ThermalFlow controls panel'),
+        ('thermal',  'target_temp_c',         '22',         'FLOAT',   'Cooling target temperature °C — ThermalFlow slider'),
+        ('thermal',  'eco_mode',              'false',      'BOOLEAN', 'Eco mode toggle — reduces cooling during off-peak hours'),
+        ('alerting', 'peak_hours_start',      '9',          'INTEGER', 'Peak window start hour UTC — Analytics power patterns chart'),
+        ('alerting', 'peak_hours_end',        '21',         'INTEGER', 'Peak window end hour UTC — Analytics power patterns chart'),
     ]
     for scope, key, val, vtype, desc in configs:
         pg(f"INSERT INTO platform_config (config_id, tenant_id, config_scope, config_key, config_value, value_type, description, created_at, updated_at) VALUES")
@@ -960,6 +978,12 @@ METRIC_PARAMS = {
     'cooling_setpoint_c':         {'base': 18, 'amp': 2,  'noise': 0.5, 'min': 15, 'max': 28},
     'airflow_cfm':                {'base': 800,'amp': 200,'noise': 50,  'min': 0,  'max': 3000},
     'rack_space_u_used':          {'base': 30, 'amp': 5,  'noise': 1,   'min': 0,  'max': 48},
+    # NOC GUI v2 derived metrics simulation params
+    'pue':                        {'base': 1.45,'amp': 0.12,'noise': 0.02,'min': 1.1, 'max': 2.5},
+    'humidity_pct':               {'base': 45,  'amp': 8,  'noise': 2,   'min': 20,  'max': 80},
+    'cooling_efficiency_pct':     {'base': 88,  'amp': 6,  'noise': 2,   'min': 50,  'max': 100},
+    'ups_load_pct':               {'base': 65,  'amp': 12, 'noise': 3,   'min': 10,  'max': 100},
+    'energy_cost_eur_today':      {'base': 320, 'amp': 80, 'noise': 20,  'min': 0,   'max': 2000},
 }
 
 def simulate_metric(metric_name, t_hours, dev_phase=0, anomaly=False):
@@ -1616,6 +1640,37 @@ for t in TENANTS:
         pg(f"   {round(random.uniform(0, 35), 1)},")
         pg(f"   {sq('neo4j://snapshots/' + uid()[:12])},")
         pg(f"   {exec_ms}, {sq(AGENT_VER_WI)}, {ts(ago(days=random.randint(1,14)))});")
+pg("")
+
+# ── GENERATED REPORT SEED (NOC GUI v2)
+pg("-- GENERATED REPORT (NOC GUI v2 — templates + recent reports per tenant)")
+REPORT_TEMPLATES = [
+    ('Monthly Energy Report',    'ENERGY',   'Monthly',   'Full facility energy consumption and PUE breakdown'),
+    ('Thermal Health Summary',   'THERMAL',  'Weekly',    'Zone temperatures, hotspot analysis, cooling efficiency'),
+    ('Capacity Planning Report', 'CAPACITY', 'Quarterly', 'Rack utilisation, power headroom, and growth projections'),
+    ('Alert Activity Report',    'ALERTS',   'Weekly',    'Alert volume, MTTR, and severity distribution by zone'),
+]
+REPORT_RECENT = [
+    ('ENERGY',   'March 2025',  'Monthly Energy Report — March 2025',   'READY',     '0 8 1 * *'),
+    ('THERMAL',  'Week 14',     'Thermal Report — Week 14',             'READY',     None),
+    ('CAPACITY', 'Q1 2025',     'Q1 2025 Capacity Review',              'READY',     None),
+    ('ALERTS',   'April 2025',  'Alert Activity — April 2025',          'GENERATING',None),
+]
+for t in TENANTS:
+    t_users = [u for u in USERS if u['tenant_id'] == t['tenant_id']]
+    created_by = sq(t_users[0]['user_id']) if t_users else 'NULL'
+    s3_stub = sq('https://s3.example.com/reports/placeholder.pdf')
+    # Templates (is_template=TRUE, status=READY, no schedule)
+    for (rname, rtype, period, desc) in REPORT_TEMPLATES:
+        pg(f"INSERT INTO generated_report (report_id, tenant_id, report_name, report_type, period_label, description, status, s3_download_url, is_template, scheduled_cron, created_by, generated_at, created_at) VALUES")
+        pg(f"  ({sq(uid())}, {sq(t['tenant_id'])}, {sq(rname)}, {sq(rtype)}, {sq(period)}, {sq(desc)}, 'READY', {s3_stub}, TRUE, NULL, {created_by}, {ts(ago(30))}, {ts(ago(30))});")
+    # Recent reports (is_template=FALSE)
+    for i, (rtype, period, rname, status, cron) in enumerate(REPORT_RECENT):
+        url      = s3_stub if status == 'READY' else 'NULL'
+        cron_val = sq(cron) if cron else 'NULL'
+        gen_at   = ts(ago(i + 1)) if status == 'READY' else 'NULL'
+        pg(f"INSERT INTO generated_report (report_id, tenant_id, report_name, report_type, period_label, description, status, s3_download_url, is_template, scheduled_cron, created_by, generated_at, created_at) VALUES")
+        pg(f"  ({sq(uid())}, {sq(t['tenant_id'])}, {sq(rname)}, {sq(rtype)}, {sq(period)}, 'Auto-generated report', {sq(status)}, {url}, FALSE, {cron_val}, {created_by}, {gen_at}, {ts(ago(i + 1))});")
 pg("")
 
 # ── AUDIT LOG ENTRIES

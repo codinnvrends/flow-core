@@ -9,6 +9,8 @@
 #   ./scripts/stack.sh down        # stop all containers (keep volumes)
 #   ./scripts/stack.sh down -v     # stop and wipe all data
 #   ./scripts/stack.sh build       # rebuild all images
+#   ./scripts/stack.sh build api-ui          # rebuild specific image
+#   ./scripts/stack.sh build api-ui --no-cache   # rebuild without cache
 #   ./scripts/stack.sh restart <group>  # restart one group
 #   ./scripts/stack.sh logs <group>     # tail logs for a group
 #   ./scripts/stack.sh status      # show all container states + ports
@@ -96,7 +98,7 @@ case "$CMD" in
     # Step 2 — Kafka
     log "Step 2/5 — Kafka (Redpanda + topic init)..."
     ensure_network
-    $DC -f "$F_STORES" -f "$F_KAFKA" --env-file "$ENV_FILE" up -d kafka
+    $DC -f "$F_STORES" -f "$F_KAFKA" --env-file "$ENV_FILE" up -d kafka kafka-ui
     log "Waiting for Kafka to be ready..."
     for i in $(seq 1 30); do
       if MSYS_NO_PATHCONV=1 docker exec flowcore-kafka rpk cluster health \
@@ -107,6 +109,7 @@ case "$CMD" in
       [[ $i -eq 30 ]] && warn "Kafka not healthy after 120s — continuing anyway"
     done
     $DC -f "$F_STORES" -f "$F_KAFKA" --env-file "$ENV_FILE" up -d kafka-init
+    ok "Kafka UI started at http://localhost:${KAFKA_UI_PORT:-8091}"
     log "Waiting for topic init to complete..."
     for i in $(seq 1 20); do
       status=$(docker inspect --format='{{.State.Status}}' flowcore-kafka-init 2>/dev/null || echo "missing")
@@ -166,6 +169,11 @@ case "$CMD" in
     echo "  NOC Frontend     ->  http://localhost:${API_GATEWAY_PORT:-8888}/"
     echo "  GraphQL          ->  http://localhost:${API_GATEWAY_PORT:-8888}/graphql"
     echo "  Insights API     ->  http://localhost:${API_GATEWAY_PORT:-8888}/api/insights/"
+    echo "  Facility API     ->  http://localhost:${API_GATEWAY_PORT:-8888}/api/facility/summary"
+    echo "  Thermal API      ->  http://localhost:${API_GATEWAY_PORT:-8888}/api/thermal/zones"
+    echo "  Power API        ->  http://localhost:${API_GATEWAY_PORT:-8888}/api/power/summary"
+    echo "  Alerts API       ->  http://localhost:${API_GATEWAY_PORT:-8888}/api/alerts"
+    echo "  Reports API      ->  http://localhost:${API_GATEWAY_PORT:-8888}/api/reports"
     echo "  Kafka UI         ->  http://localhost:${REDPANDA_UI_PORT:-8090}/"
     echo "  MLflow           ->  http://localhost:${MLFLOW_PORT:-5000}/"
     echo "  Keycloak         ->  http://localhost:${KEYCLOAK_PORT:-8080}/"
@@ -201,16 +209,48 @@ case "$CMD" in
 
   # ── Build ─────────────────────────────────────────────────────────────────
   build)
-    hdr "Building all FlowCore images"
-    log "Building platform image..."
-    $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" --env-file "$ENV_FILE" build platform
-    log "Building agents image..."
-    $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" --env-file "$ENV_FILE" build agents
-    log "Building api-ui image..."
-    $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" -f "$F_API" --env-file "$ENV_FILE" build api-ui
-    log "Building replay image..."
-    $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_REPLAY" --env-file "$ENV_FILE" build synthetic-replay
-    ok "All images built."
+    TARGET="${1:-all}"
+    shift || true
+    NO_CACHE=""
+    for arg in "$@"; do [[ "$arg" == "--no-cache" ]] && NO_CACHE="--no-cache"; done
+
+    case "$TARGET" in
+      all)
+        hdr "Building all FlowCore images"
+        log "Building platform image..."
+        $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" --env-file "$ENV_FILE" build $NO_CACHE platform
+        log "Building agents image..."
+        $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" --env-file "$ENV_FILE" build $NO_CACHE agents
+        log "Building api-ui image..."
+        $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" -f "$F_API" --env-file "$ENV_FILE" build $NO_CACHE api-ui
+        log "Building replay image..."
+        $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_REPLAY" --env-file "$ENV_FILE" build $NO_CACHE synthetic-replay
+        ok "All images built."
+        ;;
+      platform)
+        hdr "Building platform image"
+        $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" --env-file "$ENV_FILE" build $NO_CACHE platform
+        ok "Platform image built."
+        ;;
+      agents)
+        hdr "Building agents image"
+        $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" --env-file "$ENV_FILE" build $NO_CACHE agents
+        ok "Agents image built."
+        ;;
+      api-ui|apiui|api|ui)
+        hdr "Building api-ui image"
+        $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" -f "$F_API" --env-file "$ENV_FILE" build $NO_CACHE api-ui
+        ok "API-UI image built."
+        ;;
+      replay|synthetic-replay)
+        hdr "Building replay image"
+        $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_REPLAY" --env-file "$ENV_FILE" build $NO_CACHE synthetic-replay
+        ok "Replay image built."
+        ;;
+      *)
+        err "Unknown build target: $TARGET. Use: platform, agents, api-ui, replay, or all"
+        ;;
+    esac
     ;;
 
   # ── Restart a group ───────────────────────────────────────────────────────
@@ -280,6 +320,7 @@ case "$CMD" in
     ENV_PORT_MLFLOW=$(grep "^MLFLOW_PORT" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "5000")
     ENV_PORT_KC=$(grep "^KEYCLOAK_PORT" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "8080")
     echo "  NOC UI + APIs  ->  http://localhost:${ENV_PORT_API}/"
+    echo "  New GUI APIs   ->  http://localhost:${ENV_PORT_API}/api/facility|thermal|power|alerts|reports"
     echo "  Kafka UI       ->  http://localhost:${ENV_PORT_KAFKA}/"
     echo "  MLflow         ->  http://localhost:${ENV_PORT_MLFLOW}/"
     echo "  Keycloak       ->  http://localhost:${ENV_PORT_KC}/"
@@ -296,6 +337,8 @@ case "$CMD" in
     echo -e "  ${C}./scripts/stack.sh down${N}                  Stop all (keep data)"
     echo -e "  ${C}./scripts/stack.sh down -v${N}               Stop and wipe all volumes"
     echo -e "  ${C}./scripts/stack.sh build${N}                 Rebuild all images"
+    echo -e "  ${C}./scripts/stack.sh build <target>${N}          Rebuild specific image (platform|agents|api-ui|replay)"
+    echo -e "  ${C}./scripts/stack.sh build <target> --no-cache${N}  Rebuild without cache"
     echo -e "  ${C}./scripts/stack.sh restart <group>${N}       Restart one group"
     echo -e "  ${C}./scripts/stack.sh logs <group>${N}          Tail logs for a group"
     echo -e "  ${C}./scripts/stack.sh status${N}                Show all container states"

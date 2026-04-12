@@ -305,6 +305,27 @@ git push origin main
 | Synthetic Replay API | http://localhost:8050/ |
 | Keycloak | http://localhost:8080/ |
 
+
+
+Service endpoints:
+  NOC Frontend     ->  http://localhost:8888/
+  GraphQL          ->  http://localhost:8888/graphql
+  Insights API     ->  http://localhost:8888/api/insights/
+  Facility API     ->  http://localhost:8888/api/facility/summary
+  Thermal API      ->  http://localhost:8888/api/thermal/zones
+  Power API        ->  http://localhost:8888/api/power/summary
+  Alerts API       ->  http://localhost:8888/api/alerts
+  Reports API      ->  http://localhost:8888/api/reports
+  Kafka UI         ->  http://localhost:8090/
+  MLflow           ->  http://localhost:5000/
+  Keycloak         ->  http://localhost:8080/
+  Replay control   ->  http://localhost:8050/status
+
+Test credentials:
+  noc-operator / operator123
+  change-manager / manager123
+  dc-admin / dcadmin123
+  platform-admin / platformadmin123
 ---
 
 *Generated: April 11, 2026*

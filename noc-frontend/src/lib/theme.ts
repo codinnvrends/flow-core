@@ -37,11 +37,21 @@ export const nocTheme = createTheme({
     MuiTableCell: {
       styleOverrides: { root: { borderColor: 'rgba(255,255,255,0.05)' } },
     },
+    MuiButton: {
+      styleOverrides: {
+        root: { textTransform: 'none', fontWeight: 600 },
+      },
+    },
   },
 })
 
+// ── Layout constants ───────────────────────────────────────────────────────────
+export const SIDEBAR_WIDTH  = 260
+export const TOPBAR_HEIGHT  = 64
+
+// ── Colour helpers ─────────────────────────────────────────────────────────────
 export const healthColor = (status: string, score: number): string => {
-  if (status === 'OFFLINE') return '#E05A5A'
+  if (status === 'OFFLINE')  return '#E05A5A'
   if (status === 'DEGRADED') return '#F59E0B'
   if (score >= 0.85) return '#059669'
   if (score >= 0.60) return '#F59E0B'
@@ -55,3 +65,28 @@ export const severityColor = (sev: string): string => ({
   WARNING:  '#F59E0B',
   INFO:     '#64748B',
 }[sev] || '#64748B')
+
+export const tempColor = (c: number): string => {
+  if (c >= 35) return '#E05A5A'
+  if (c >= 30) return '#F59E0B'
+  if (c >= 25) return '#0891B2'
+  return '#059669'
+}
+
+export const confidenceColor = (score: number): string => {
+  if (score >= 0.85) return '#059669'
+  if (score >= 0.70) return '#F59E0B'
+  return '#E05A5A'
+}
+
+// Recharts shared axis / tooltip styles (dark theme)
+export const CHART_COLORS = {
+  it:      '#0891B2',
+  cooling: '#059669',
+  other:   '#64748B',
+  pue:     '#A78BFA',
+  power:   '#F59E0B',
+  temp:    '#E05A5A',
+  grid:    'rgba(255,255,255,0.06)',
+  text:    '#94A3B8',
+}

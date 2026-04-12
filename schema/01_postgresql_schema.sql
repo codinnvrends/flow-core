@@ -552,3 +552,39 @@ INSERT INTO kafka_topic (topic_name, producer_service, consumer_services, conten
 ('classification.results','classification-capability-agent','graph-updater-service,insights-api-service',                                                'CLASSIFICATION',    'v1', '1', TRUE),
 ('incidents.correlated',  'correlation-root-cause-agent',   'eventing-integration-service,insights-api-service',                                         'INCIDENT',          'v1', '2', TRUE)
 ON CONFLICT (topic_name) DO NOTHING;
+
+-- =============================================================================
+-- NOC GUI v2 — GENERATED REPORT
+-- Tracks report generation requests, scheduling, and S3 download URLs.
+-- Required by the Reports screen (menu item 6).
+-- Added: NOC GUI v2 migration
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS generated_report (
+    report_id        UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id        UUID          NOT NULL REFERENCES tenant(tenant_id) ON DELETE CASCADE,
+    report_name      VARCHAR(200)  NOT NULL,
+    report_type      VARCHAR(60)   NOT NULL
+                         CHECK (report_type IN ('ENERGY','THERMAL','CAPACITY','ALERTS','CUSTOM')),
+    period_label     VARCHAR(80),
+    description      TEXT,
+    status           VARCHAR(20)   NOT NULL DEFAULT 'PENDING'
+                         CHECK (status IN ('PENDING','GENERATING','READY','FAILED')),
+    s3_download_url  VARCHAR(500),
+    is_template      BOOLEAN       NOT NULL DEFAULT FALSE,
+    scheduled_cron   VARCHAR(100),
+    created_by       UUID          REFERENCES "user"(user_id) ON DELETE SET NULL,
+    generated_at     TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_generated_report_tenant
+    ON generated_report (tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_generated_report_status
+    ON generated_report (tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_generated_report_template
+    ON generated_report (tenant_id, is_template) WHERE is_template = TRUE;
+
+COMMENT ON TABLE generated_report IS
+    'NOC GUI v2: report generation queue and metadata. '
+    'Phase 1: status=PENDING only. PDF generation worker is Phase 2.';

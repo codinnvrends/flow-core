@@ -1,7 +1,7 @@
 {
   "name": "noc-frontend",
-  "version": "1.0.0",
-  "description": "FlowCore NOC Experience \u2014 Phase 1",
+  "version": "2.0.0",
+  "description": "FlowCore NOC Experience — Phase 2 Dark Sidebar UI",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "tsc && vite build",
@@ -15,6 +15,7 @@
     "@mui/icons-material": "^5.15.21",
     "@mui/material": "^5.15.21",
     "@mui/x-data-grid": "^7.7.0",
+    "axios": "^1.7.2",
     "cytoscape": "^3.29.2",
     "d3": "^7.9.0",
     "graphql": "^16.9.0",
@@ -22,8 +23,8 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.23.1",
-    "subscriptions-transport-ws": "^0.11.0",
-    "axios": "^1.7.2"
+    "recharts": "^2.12.7",
+    "subscriptions-transport-ws": "^0.11.0"
   },
   "devDependencies": {
     "@types/cytoscape": "^3.19.16",
