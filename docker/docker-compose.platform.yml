@@ -41,10 +41,6 @@ services:
       NEO4J_HOST: neo4j
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KEYCLOAK_PORT: "8080"
-      # OpenTelemetry configuration for SigNoz
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://signoz-otel-collector:4317
-      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
-      OTEL_RESOURCE_ATTRIBUTES: service.name=flowcore-platform,deployment.environment=development,service.namespace=flowcore,host.name=platform
     ports:
       # Keycloak admin UI (also used by other services for token validation)
       - "${KEYCLOAK_PORT:-8080}:8080"
@@ -80,8 +76,6 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
-      signoz-otel-collector:
-        condition: service_started
     networks:
       - flowcore-net
 

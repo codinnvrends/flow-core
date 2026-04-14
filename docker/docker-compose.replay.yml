@@ -54,10 +54,6 @@ services:
       REPLAY_HISTORICAL_SPEED: "${REPLAY_HISTORICAL_SPEED:-60}"
       REPLAY_PORT: "${REPLAY_PORT:-8050}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
-      # OpenTelemetry configuration for SigNoz
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://signoz-otel-collector:4317
-      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
-      OTEL_RESOURCE_ATTRIBUTES: service.name=flowcore-replay,deployment.environment=development,service.namespace=flowcore,host.name=replay
     ports:
       - "${REPLAY_PORT:-8050}:8050"
     healthcheck:

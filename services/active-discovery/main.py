@@ -7,7 +7,6 @@ Admin REST API on :8003
 import sys
 import os
 # Add parent directory to path for shared telemetry module
-sys.path.insert(0, "/app")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import telemetry
 
@@ -32,7 +31,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("active-discovery")
 
 KAFKA_BROKERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")

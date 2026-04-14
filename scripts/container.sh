@@ -14,7 +14,6 @@ PROJECT_NAME="flowcore"
 COMPOSE_FILES=(
     "$DOCKER_DIR/docker-compose.yml"
     "$DOCKER_DIR/docker-compose.kafka.yml"
-    "$DOCKER_DIR/docker-compose.signoz.yml"
     "$DOCKER_DIR/docker-compose.platform.yml"
     "$DOCKER_DIR/docker-compose.agents.yml"
     "$DOCKER_DIR/docker-compose.api.yml"

@@ -40,10 +40,6 @@ services:
       TOPO_AGENT_PORT: "${TOPO_AGENT_PORT:-8020}"
       CLASS_AGENT_PORT: "${CLASS_AGENT_PORT:-8021}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
-      # OpenTelemetry configuration for SigNoz
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://signoz-otel-collector:4317
-      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
-      OTEL_RESOURCE_ATTRIBUTES: service.name=flowcore-agents,deployment.environment=development,service.namespace=flowcore,host.name=agents
     ports:
       # MLflow UI — host exposed for model registry access
       - "${MLFLOW_PORT:-5000}:5000"

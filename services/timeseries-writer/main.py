@@ -6,7 +6,6 @@ Batches inserts for throughput efficiency.
 import sys
 import os
 # Add parent directory to path for shared telemetry module
-sys.path.insert(0, "/app")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import telemetry
 
@@ -29,7 +28,7 @@ from confluent_kafka import Consumer
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-
+s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("timeseries-writer")
 
 KAFKA_BROKERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")

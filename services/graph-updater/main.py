@@ -9,7 +9,6 @@ Performs: Entity resolution using entity_resolution_rule from PostgreSQL
 import sys
 import os
 # Add parent directory to path for shared telemetry module
-sys.path.insert(0, "/app")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import telemetry
 
@@ -33,7 +32,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("graph-updater")
 
 # ── Config ────────────────────────────────────────────────────────────────────
