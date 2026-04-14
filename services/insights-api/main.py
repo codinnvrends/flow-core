@@ -128,6 +128,7 @@ def health():
 # =============================================================================
 
 @app.get("/drift/events")
+@app.get("/api/drift/events")
 async def list_drift_events(
     tenant_id: Optional[str] = None,
     status: Optional[str] = None,
@@ -193,6 +194,7 @@ async def update_drift_status(drift_id: str, status: str,
 
 
 @app.get("/drift/summary")
+@app.get("/api/drift/summary")
 async def drift_summary(tenant_id: Optional[str] = None):
     params = [tenant_id] if tenant_id else []
     w = "WHERE tenant_id=$1 AND status='OPEN'" if tenant_id else "WHERE status='OPEN'"
@@ -798,27 +800,28 @@ async def list_alerts(
                 "resolved_today": int(counts_row["resolved_today"] or 0),
             }
 
-            # FIX: Fetch entity names from PostgreSQL and join in Python
+            # Fetch entity names from PostgreSQL and join in Python
             entity_ids = [r["entity_id"] for r in rows if r["entity_id"]]
             device_names = {}
             if entity_ids:
                 async with _pool.acquire() as pg_conn:
                     placeholders = ",".join(f"${i+1}" for i in range(len(entity_ids)))
                     entity_rows = await pg_conn.fetch(
-                        f"SELECT entity_id, canonical_name FROM infrastructure_entity_ref WHERE entity_id IN ({placeholders})",
+                        f"SELECT entity_id, canonical_name, entity_class FROM infrastructure_entity_ref WHERE entity_id IN ({placeholders})",
                         *entity_ids,
                     )
-                    device_names = {r["entity_id"]: r["canonical_name"] for r in entity_rows}
+                    device_names = {r["entity_id"]: (r["canonical_name"], r["entity_class"]) for r in entity_rows}
 
             items = [
                 {
-                    "alert_id":   r["alert_id"],
-                    "status":     r["status"],
-                    "event_ts":   r["event_ts"],
-                    "title":      r["title"],
-                    "severity":   r["severity"],
-                    "description":r["description"],
-                    "device":     device_names.get(r["entity_id"], "Unknown"),
+                    "alert_id":    r["alert_id"],
+                    "status":      r["status"],
+                    "event_ts":    r["event_ts"],
+                    "title":       r["title"],
+                    "severity":    r["severity"],
+                    "description": r["description"],
+                    "device":      device_names.get(r["entity_id"], ("Unknown", ""))[0],
+                    "zone":        device_names.get(r["entity_id"], ("", "Unknown"))[1],
                 }
                 for r in rows
             ]
