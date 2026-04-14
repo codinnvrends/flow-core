@@ -124,7 +124,7 @@ function HealthTimeline({ data, window: win }: { data: { timestamp: string; pue?
         <YAxis yAxisId="pue" domain={[1.0, 2.5]} tick={{ fontSize: 10, fill: CHART_COLORS.text }} width={32} />
         <YAxis yAxisId="power" orientation="right" tick={{ fontSize: 10, fill: CHART_COLORS.text }} width={36} />
         <RTooltip
-          contentStyle={{ bgcolor: '#111E2D', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, fontSize: 11 }}
+          contentStyle={{ background: '#111E2D', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, fontSize: 11 }}
           labelStyle={{ color: '#94A3B8' }}
         />
         <Legend wrapperStyle={{ fontSize: 11, color: '#94A3B8' }} />

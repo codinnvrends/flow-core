@@ -42,7 +42,7 @@ const METRIC_QUERY = gql`
 
 // ── Cytoscape topology ────────────────────────────────────────────────────────
 
-const CY_STYLE: cytoscape.Stylesheet[] = [
+const CY_STYLE: (cytoscape.StylesheetStyle | cytoscape.StylesheetCSS)[] = [
   {
     selector: 'node',
     style: {
