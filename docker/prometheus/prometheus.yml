@@ -1,0 +1,82 @@
+# =============================================================================
+# Prometheus Configuration for FlowCore
+# =============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'flowcore'
+    replica: '{{.ExternalURL}}'
+
+# Alertmanager configuration (optional - can integrate with FlowCore alerts)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+      # Uncomment to use FlowCore's eventing for alerts:
+      # - targets: ['platform:8012']  # event-archive service
+
+# Load alert rules
+rule_files:
+  - 'alerts.yml'
+
+# Scrape configurations
+scrape_configs:
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # FlowCore Platform Services
+  - job_name: 'flowcore-platform'
+    static_configs:
+      - targets:
+        - 'platform:8001'  # dcim-ingestion
+        - 'platform:8002'  # telemetry-gateway  
+        - 'platform:8003'  # active-discovery
+        - 'platform:8010'  # graph-updater
+        - 'platform:8011'  # timeseries-writer
+        - 'platform:8012'  # event-archive
+    metrics_path: /metrics
+    scrape_interval: 15s
+
+  # FlowCore AI Agents
+  - job_name: 'flowcore-agents'
+    static_configs:
+      - targets:
+        - 'agents:8020'  # topology-agent
+        - 'agents:8022'  # classification-agent
+    metrics_path: /metrics
+    scrape_interval: 15s
+
+  # FlowCore API/UI Services
+  - job_name: 'flowcore-api'
+    static_configs:
+      - targets:
+        - 'api-ui:4000'  # graph-api
+        - 'api-ui:4001'  # insights-api
+        - 'api-ui:4002'  # eventing-api
+    metrics_path: /metrics
+    scrape_interval: 15s
+
+  # Infrastructure Node Exporter (if running)
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+
+# Remote write configuration - FlowCore telemetry-gateway can also push here
+# This enables FlowCore-synthetic-replay to send to Prometheus directly
+remote_write:
+  - url: 'http://localhost:9090/api/v1/write'
+    queue_config:
+      capacity: 10000
+      max_samples_per_send: 2000
+      batch_send_deadline: 5s
+
+# Remote read (optional) - allows Prometheus to query long-term storage
+# remote_read:
+#   - url: 'http://platform:8002/api/v1/read'
+#     read_recent: false

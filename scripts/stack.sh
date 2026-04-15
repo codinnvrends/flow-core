@@ -53,6 +53,7 @@ F_PLATFORM="$DOCKER_DIR/docker-compose.platform.yml"
 F_REPLAY="$DOCKER_DIR/docker-compose.replay.yml"
 F_AGENTS="$DOCKER_DIR/docker-compose.agents.yml"
 F_API="$DOCKER_DIR/docker-compose.api.yml"
+F_PROM="$DOCKER_DIR/docker-compose.prometheus.yml"
 F_FULL="$DOCKER_DIR/docker-compose.full.yml"
 ENV_FILE="$DOCKER_DIR/.env"
 
@@ -94,9 +95,9 @@ case "$CMD" in
     done
 
     # Step 2 — Kafka
-    log "Step 2/5 — Kafka (Redpanda + topic init)..."
+    log "Step 2/5 — Kafka (Redpanda + Kafka UI + topic init)..."
     ensure_network
-    $DC -f "$F_STORES" -f "$F_KAFKA" --env-file "$ENV_FILE" up -d kafka
+    $DC -f "$F_STORES" -f "$F_KAFKA" --env-file "$ENV_FILE" up -d kafka kafka-ui
     log "Waiting for Kafka to be ready..."
     for i in $(seq 1 30); do
       if MSYS_NO_PATHCONV=1 docker exec flowcore-kafka rpk cluster health \
@@ -151,6 +152,21 @@ case "$CMD" in
     log "Step 5/5 — API gateway + NOC frontend..."
     $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" -f "$F_API" \
         --env-file "$ENV_FILE" up -d api-ui
+
+    # Step 6 — Prometheus (optional, for metrics UI)
+    if [[ "$NO_REPLAY" == "false" ]]; then
+      log "Step 6/6 — Prometheus metrics UI..."
+      $DC -f "$F_PROM" --env-file "$ENV_FILE" up -d prometheus node-exporter
+      log "Waiting for Prometheus..."
+      for i in $(seq 1 20); do
+        if docker inspect --format='{{.State.Health.Status}}' flowcore-prometheus \
+             2>/dev/null | grep -q healthy; then
+          ok "Prometheus healthy"; break
+        fi
+        sleep 3
+        [[ $i -eq 20 ]] && warn "Prometheus not healthy after 60s"
+      done
+    fi
     log "Waiting for API + UI..."
     for i in $(seq 1 20); do
       if docker inspect --format='{{.State.Health.Status}}' flowcore-api-ui \
@@ -216,14 +232,15 @@ case "$CMD" in
   # ── Restart a group ───────────────────────────────────────────────────────
   restart)
     GROUP="${1:-}"
-    [[ -z "$GROUP" ]] && err "Usage: stack.sh restart <stores|kafka|platform|agents|api-ui|replay>"
+    [[ -z "$GROUP" ]] && err "Usage: stack.sh restart <stores|kafka|platform|agents|api-ui|replay|prometheus>"
     case "$GROUP" in
-      stores)   $DC -f "$F_STORES" --env-file "$ENV_FILE" restart ;;
-      kafka)    $DC -f "$F_STORES" -f "$F_KAFKA" --env-file "$ENV_FILE" restart kafka ;;
-      platform) $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" --env-file "$ENV_FILE" restart platform ;;
-      agents)   $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" --env-file "$ENV_FILE" restart agents ;;
-      api-ui)   $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" -f "$F_API" --env-file "$ENV_FILE" restart api-ui ;;
-      replay)   $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_REPLAY" --env-file "$ENV_FILE" restart synthetic-replay ;;
+      stores)     $DC -f "$F_STORES" --env-file "$ENV_FILE" restart ;;
+      kafka)      $DC -f "$F_STORES" -f "$F_KAFKA" --env-file "$ENV_FILE" restart kafka ;;
+      platform)   $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" --env-file "$ENV_FILE" restart platform ;;
+      agents)     $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" --env-file "$ENV_FILE" restart agents ;;
+      api-ui)     $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" -f "$F_API" --env-file "$ENV_FILE" restart api-ui ;;
+      replay)     $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_REPLAY" --env-file "$ENV_FILE" restart synthetic-replay ;;
+      prometheus) $DC -f "$F_PROM" --env-file "$ENV_FILE" restart prometheus ;;
       *) err "Unknown group: $GROUP" ;;
     esac
     ok "$GROUP restarted."
@@ -242,8 +259,9 @@ case "$CMD" in
       agents)             CTR="flowcore-agents" ;;
       api-ui|api|ui)      CTR="flowcore-api-ui" ;;
       replay)             CTR="flowcore-replay" ;;
+      prometheus|prom)     CTR="flowcore-prometheus" ;;
       all|"")             $DC -f "$F_FULL" --env-file "$ENV_FILE" logs -f; exit 0 ;;
-      *) err "Unknown group: $GROUP. Use: stores kafka platform agents api-ui replay all" ;;
+      *) err "Unknown group: $GROUP. Use: stores kafka platform agents api-ui replay prometheus all" ;;
     esac
     docker logs -f "$CTR"
     ;;
@@ -262,7 +280,9 @@ case "$CMD" in
       flowcore-platform \
       flowcore-replay \
       flowcore-agents \
-      flowcore-api-ui; do
+      flowcore-api-ui \
+      flowcore-prometheus \
+      flowcore-node-exporter; do
       status=$(docker inspect --format='{{.State.Status}}' "$ctr" 2>/dev/null || echo "not found")
       health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}' \
                "$ctr" 2>/dev/null || echo "-")
@@ -279,10 +299,12 @@ case "$CMD" in
     ENV_PORT_KAFKA=$(grep "^REDPANDA_UI_PORT" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "8090")
     ENV_PORT_MLFLOW=$(grep "^MLFLOW_PORT" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "5000")
     ENV_PORT_KC=$(grep "^KEYCLOAK_PORT" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "8080")
+    ENV_PORT_PROM=$(grep "^PROMETHEUS_PORT" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "9090")
     echo "  NOC UI + APIs  ->  http://localhost:${ENV_PORT_API}/"
     echo "  Kafka UI       ->  http://localhost:${ENV_PORT_KAFKA}/"
     echo "  MLflow         ->  http://localhost:${ENV_PORT_MLFLOW}/"
     echo "  Keycloak       ->  http://localhost:${ENV_PORT_KC}/"
+    echo "  Prometheus     ->  http://localhost:${ENV_PORT_PROM}/"
     ;;
 
   # ── Help ──────────────────────────────────────────────────────────────────
@@ -300,7 +322,7 @@ case "$CMD" in
     echo -e "  ${C}./scripts/stack.sh logs <group>${N}          Tail logs for a group"
     echo -e "  ${C}./scripts/stack.sh status${N}                Show all container states"
     echo ""
-    echo -e "  Groups: ${Y}stores  kafka  platform  agents  api-ui  replay  all${N}"
+    echo -e "  Groups: ${Y}stores  kafka  platform  agents  api-ui  replay  prometheus  all${N}"
     echo ""
     ;;
 esac

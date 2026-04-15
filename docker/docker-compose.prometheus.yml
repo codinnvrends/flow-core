@@ -1,0 +1,73 @@
+version: "3.9"
+# =============================================================================
+# FlowCore — Prometheus Metrics UI
+#
+# Adds Prometheus server with built-in web UI for PromQL queries and graphing.
+# FlowCore telemetry-gateway sends metrics to Prometheus via remote write.
+#
+# Access Prometheus UI: http://localhost:9090
+#   - Status → Targets: See what's being monitored
+#   - Graph: Execute PromQL queries with visualization
+#   - Alerts: View alert rules and status
+#
+# Run:
+#   docker compose -f docker/docker-compose.prometheus.yml up -d
+# =============================================================================
+
+services:
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: flowcore-prometheus
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-remote-write-receiver'  # Accept remote write at /api/v1/write
+      - '--query.timeout=2m'
+      - '--query.max-samples=50000000'
+    networks:
+      - flowcore-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy | grep -q 'Prometheus is Healthy'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # Optional: Node exporter for host metrics (CPU, memory, disk)
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: flowcore-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - flowcore-net
+
+volumes:
+  prometheus_data:
+
+networks:
+  flowcore-net:
+    external: true
+    name: flowcore_flowcore-net

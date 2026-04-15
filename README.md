@@ -55,6 +55,12 @@ End-to-end Digital Twin platform for data center infrastructure management with 
 ### Synthetic Data (docker/docker-compose.replay.yml)
 - **Synthetic Replay** — Generates telemetry at 1000 events/sec, API at http://localhost:8050/
 
+### Prometheus Metrics UI (docker/docker-compose.prometheus.yml)
+- **Prometheus Server** — Metrics collection and storage at http://localhost:9090/
+- **Built-in UI** — PromQL query editor, graph visualization, alert management
+- **Node Exporter** — Host system metrics (CPU, memory, disk)
+- **Remote Write** — FlowCore telemetry-gateway sends metrics to Prometheus
+
 ## Prerequisites
 
 | Tool | Version | Purpose |
@@ -117,6 +123,7 @@ docker compose \
 | **Keycloak** | http://localhost:8080/ | Authentication admin |
 | **Replay API** | http://localhost:8050/ | Synthetic data control |
 | **Neo4j Browser** | http://localhost:7474/ | Graph visualization |
+| **Prometheus** | http://localhost:9090/ | Metrics UI, PromQL queries, graphs |
 
 ## Connection Details
 
@@ -148,7 +155,9 @@ flowcore/
 │   ├── docker-compose.agents.yml       # MLflow, Topology, Classification
 │   ├── docker-compose.api.yml          # GraphQL, Insights, Eventing, NOC UI
 │   ├── docker-compose.replay.yml       # Synthetic telemetry generator
-│   └── dockerfiles/                    # Container build definitions
+│   ├── docker-compose.prometheus.yml   # Prometheus metrics UI
+│   ├── dockerfiles/                    # Container build definitions
+│   └── prometheus/                     # Prometheus config & alert rules
 ├── services/
 │   ├── graph-api/                      # GraphQL resolvers
 │   ├── insights-api/                   # Analytics endpoints
@@ -181,6 +190,62 @@ flowcore/
 - 40 canonical metrics × 2 tenants
 - 30 days of hourly metric datapoints (~2.3M rows in TimescaleDB)
 - Full Layer 4 agent output data: drift events, correlated incidents, capacity forecasts, anomaly flags, failure probability scores, simulation scenarios/results
+
+## Prometheus Integration
+
+FlowCore includes native Prometheus integration for metrics visualization via the Prometheus Expression Browser.
+
+### Architecture
+
+```
+FlowCore Telemetry Gateway (:8002) ──► Prometheus (:9090)
+   POST /api/v1/write                    ├─ PromQL queries
+   (snappy+protobuf)                     ├─ Graph visualization
+                                         └─ Alert management
+```
+
+### Access Prometheus UI
+
+After starting the stack, open: **http://localhost:9090/**
+
+Key features:
+- **Graph**: Execute PromQL queries with real-time visualization
+- **Status → Targets**: View all monitored FlowCore services
+- **Alerts**: See active and pending alerts
+- **Status → Command-Line Flags**: View Prometheus configuration
+
+### Common PromQL Queries
+
+```promql
+# Total metrics received by telemetry-gateway
+telemetry_gateway_metrics_received_total
+
+# FlowCore service up/down status
+up{job=~"flowcore-.*"}
+
+# HTTP request latency (95th percentile)
+histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+
+# CPU usage from node-exporter
+100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+```
+
+### Configuration
+
+Prometheus config: `docker/prometheus/prometheus.yml`
+- Scrapes FlowCore services every 15s
+- Remote write receiver enabled at `/api/v1/write`
+- 15-day local retention (configurable)
+
+Alert rules: `docker/prometheus/alerts.yml`
+- FlowCore service health alerts
+- Infrastructure alerts (CPU, memory, disk)
+
+### Manual Start (without full stack)
+
+```bash
+docker compose -f docker/docker-compose.prometheus.yml up -d
+```
 
 ## Troubleshooting
 

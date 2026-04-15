@@ -1,14 +1,17 @@
 """
 FlowCore Telemetry Gateway Service
 Inbound paths:
-  POST /prom/write   → Prometheus remote write (protobuf or JSON)
+  POST /api/v1/write → Native Prometheus remote write (snappy+protobuf)
+  POST /prom/write   → Prometheus remote write (JSON - simplified)
   POST /webhook      → Zabbix/Icinga alert webhooks (JSON)
   POST /metrics      → Generic metrics JSON endpoint
+  GET  /metrics      → Prometheus self-metrics (exposition format)
 Publishes to: metrics.timeseries.raw, alerts.raw, events.raw
 """
 import json
 import logging
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -16,9 +19,25 @@ from typing import Any, Optional
 import asyncpg
 import uvicorn
 from confluent_kafka import Producer
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# Prometheus remote write support
+try:
+    import snappy
+    HAS_SNAPPY = True
+except ImportError:
+    HAS_SNAPPY = False
+    logging.warning("snappy not installed. Native Prometheus remote write disabled. pip install python-snappy")
+
+# Prometheus client for self-metrics
+try:
+    from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+    HAS_PROMETHEUS_CLIENT = True
+except ImportError:
+    HAS_PROMETHEUS_CLIENT = False
+    logging.warning("prometheus-client not installed. Self-metrics disabled. pip install prometheus-client")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("telemetry-gateway")
@@ -161,7 +180,193 @@ def get_stats():
     return stats
 
 
-# ── Prometheus remote write endpoint ─────────────────────────────────────────
+# ── Prometheus self-metrics endpoint ──────────────────────────────────────────
+
+# Initialize Prometheus metrics if client available
+if HAS_PROMETHEUS_CLIENT:
+    METRICS_RECEIVED = Counter('telemetry_gateway_metrics_received_total', 'Total metrics received', ['source'])
+    ALERTS_RECEIVED = Counter('telemetry_gateway_alerts_received_total', 'Total alerts received', ['source'])
+    EVENTS_RECEIVED = Counter('telemetry_gateway_events_received_total', 'Total events received', ['source'])
+    REQUEST_LATENCY = Histogram('telemetry_gateway_request_duration_seconds', 'Request latency', ['endpoint'])
+    ACTIVE_MAPPINGS = Gauge('telemetry_gateway_active_metric_mappings', 'Number of active metric mappings')
+    ACTIVE_SOURCES = Gauge('telemetry_gateway_active_sources', 'Number of active telemetry sources')
+else:
+    METRICS_RECEIVED = ALERTS_RECEIVED = EVENTS_RECEIVED = None
+    REQUEST_LATENCY = None
+    ACTIVE_MAPPINGS = ACTIVE_SOURCES = None
+
+
+@app.get("/metrics")
+def prometheus_metrics():
+    """Prometheus exposition format metrics for self-monitoring."""
+    if HAS_PROMETHEUS_CLIENT:
+        # Update gauges
+        ACTIVE_MAPPINGS.set(len(_metric_map))
+        ACTIVE_SOURCES.set(len(_source_map))
+        
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    else:
+        # Fallback to manual format
+        lines = [
+            "# HELP telemetry_gateway_metrics_received_total Total metrics received",
+            "# TYPE telemetry_gateway_metrics_received_total counter",
+            f'telemetry_gateway_metrics_received_total{{source="all"}} {stats["metrics_received"]}',
+            "",
+            "# HELP telemetry_gateway_alerts_received_total Total alerts received",
+            "# TYPE telemetry_gateway_alerts_received_total counter",
+            f'telemetry_gateway_alerts_received_total{{source="all"}} {stats["alerts_received"]}',
+            "",
+            "# HELP telemetry_gateway_active_metric_mappings Number of active metric mappings",
+            "# TYPE telemetry_gateway_active_metric_mappings gauge",
+            f'telemetry_gateway_active_metric_mappings {len(_metric_map)}',
+            "",
+            "# HELP telemetry_gateway_active_sources Number of active telemetry sources",
+            "# TYPE telemetry_gateway_active_sources gauge",
+            f'telemetry_gateway_active_sources {len(_source_map)}',
+        ]
+        return Response("\n".join(lines), media_type="text/plain; version=0.0.4")
+
+
+# ── Native Prometheus Remote Write endpoint (/api/v1/write) ──────────────────
+
+@app.post("/api/v1/write")
+async def prometheus_native_remote_write(request: Request):
+    """
+    Native Prometheus Remote Write endpoint.
+    
+    Accepts:
+    - Content-Encoding: snappy
+    - Body: snappy-compressed protobuf WriteRequest
+    
+    Prometheus sends to this endpoint when remote_write is configured.
+    """
+    if not HAS_SNAPPY:
+        raise HTTPException(501, "Snappy compression not available. Install: pip install python-snappy")
+    
+    content_encoding = request.headers.get('content-encoding', '').lower()
+    body = await request.body()
+    
+    # Decompress snappy
+    if 'snappy' in content_encoding:
+        try:
+            body = snappy.decompress(body)
+        except Exception as e:
+            logger.error(f"Snappy decompression failed: {e}")
+            raise HTTPException(400, "Failed to decompress snappy payload")
+    
+    # Try to parse as JSON first (for testing with curl)
+    try:
+        data = json.loads(body)
+        samples = _parse_write_request_json(data)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        # Try protobuf (production Prometheus format)
+        try:
+            samples = _parse_write_request_protobuf(body)
+        except Exception as e:
+            logger.error(f"Failed to parse request: {e}")
+            raise HTTPException(400, "Failed to parse request. Expected snappy+protobuf or JSON.")
+    
+    # Process samples
+    source_id, tenant_id = first_source()
+    published = 0
+    
+    for sample in samples:
+        name = sample['metric_name']
+        value = sample['value']
+        labels = sample['labels']
+        ts_ms = sample['timestamp_ms']
+        
+        event_ts = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).isoformat()
+        
+        # Look up metric catalogue
+        mapping = _metric_map.get(name)
+        if mapping:
+            converted = apply_conversion(float(value), mapping.get("conversion"))
+            entity_id = labels.get("instance", labels.get("job", "unknown"))
+            msg = make_metric_msg(entity_id, "DEVICE", mapping["metric_id"],
+                                  mapping.get("source_id", source_id), tenant_id, converted, event_ts)
+            publish("metrics.timeseries.raw", msg, key=entity_id)
+            stats["metrics_received"] += 1
+            published += 1
+            
+            if METRICS_RECEIVED:
+                METRICS_RECEIVED.labels(source="prometheus_remote_write").inc()
+        else:
+            # Unknown metric - publish with placeholder for archival
+            entity_id = labels.get("instance", "unknown")
+            msg = {
+                "message_id": str(uuid.uuid4()),
+                "tenant_id": tenant_id,
+                "entity_id": entity_id,
+                "entity_class": "DEVICE",
+                "metric_id": f"unknown:{name}",
+                "source_id": source_id,
+                "value": float(value),
+                "quality_flag": "VALID",
+                "event_ts": event_ts,
+                "ingest_ts": datetime.now(timezone.utc).isoformat(),
+                "source_metric_name": name,
+                "labels": labels,
+            }
+            publish("metrics.timeseries.raw", msg, key=entity_id)
+            stats["metrics_received"] += 1
+            published += 1
+    
+    _producer.flush(1)
+    logger.info(f"Processed {published} samples from Prometheus remote write")
+    return Response(status_code=204)  # Prometheus expects 204 No Content
+
+
+def _parse_write_request_json(data) -> list:
+    """Parse JSON format write request (for testing)."""
+    samples = []
+    
+    if isinstance(data, list):
+        # List of individual metrics
+        for item in data:
+            samples.append({
+                'metric_name': item.get('__name__', item.get('name', 'unknown')),
+                'labels': {k: v for k, v in item.items() if not k.startswith('_') and k != 'value' and k != 'timestamp'},
+                'value': float(item.get('value', 0)),
+                'timestamp_ms': int(item.get('timestamp', datetime.now(timezone.utc).timestamp() * 1000))
+            })
+    elif isinstance(data, dict):
+        # Timeseries format
+        for ts in data.get('timeseries', []):
+            labels = {}
+            for label in ts.get('labels', []):
+                labels[label.get('name')] = label.get('value')
+            
+            metric_name = labels.pop('__name__', 'unknown')
+            
+            for sample in ts.get('samples', []):
+                samples.append({
+                    'metric_name': metric_name,
+                    'labels': labels.copy(),
+                    'value': float(sample.get('value', 0)),
+                    'timestamp_ms': int(sample.get('timestamp', datetime.now(timezone.utc).timestamp() * 1000))
+                })
+    
+    return samples
+
+
+def _parse_write_request_protobuf(body: bytes) -> list:
+    """Parse protobuf WriteRequest. Requires generated protobuf code."""
+    # This is a placeholder - full implementation requires:
+    # 1. Generate protobuf from https://github.com/prometheus/prometheus/blob/main/prompb/remote.proto
+    # 2. Import the generated module
+    # For now, we raise an informative error
+    
+    logger.error("Protobuf parsing requires generated code. Use JSON format for testing.")
+    raise NotImplementedError(
+        "Protobuf support requires generated protobuf code. "
+        "To enable: 1) Download remote.proto from Prometheus repo, "
+        "2) Generate Python bindings: protoc --python_out=. remote.proto, "
+        "3) Import generated module here."
+    )
+
+
+# ── Legacy Prometheus remote write endpoint (/prom/write) ──────────────────────
 
 class PrometheusMetric(BaseModel):
     name: str

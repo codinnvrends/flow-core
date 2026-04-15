@@ -461,6 +461,30 @@ def status():
     return {**state, "topics": state["topics"]}
 
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus metrics endpoint."""
+    from fastapi import Response
+    lines = [
+        "# HELP synthetic_replay_up Service up status",
+        "# TYPE synthetic_replay_up gauge",
+        'synthetic_replay_up{service="synthetic-replay"} 1',
+        "",
+        "# HELP synthetic_replay_running Replay running status",
+        "# TYPE synthetic_replay_running gauge",
+        f'synthetic_replay_running{{service="synthetic-replay"}} {1 if state["running"] else 0}',
+        "",
+        "# HELP synthetic_replay_events_total Total events replayed",
+        "# TYPE synthetic_replay_events_total counter",
+        f'synthetic_replay_events_total{{service="synthetic-replay"}} {state["events_replayed"]}',
+        "",
+        "# HELP synthetic_replay_errors_total Total errors",
+        "# TYPE synthetic_replay_errors_total counter",
+        f'synthetic_replay_errors_total{{service="synthetic-replay"}} {state["errors"]}',
+    ]
+    return Response("\n".join(lines), media_type="text/plain; version=0.0.4")
+
+
 class RateRequest(BaseModel):
     events_per_sec: int
 

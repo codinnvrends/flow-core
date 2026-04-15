@@ -341,6 +341,26 @@ def get_stats():
     return {**stats, "dcim_cache_size": len(_dcim_entities)}
 
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus metrics endpoint."""
+    from fastapi import Response
+    lines = [
+        "# HELP topology_agent_up Service up status",
+        "# TYPE topology_agent_up gauge",
+        'topology_agent_up{service="topology-agent"} 1',
+        "",
+        "# HELP topology_agent_dcim_records_seen_total Total DCIM records seen",
+        "# TYPE topology_agent_dcim_records_seen_total counter",
+        f'topology_agent_dcim_records_seen_total{{service="topology-agent"}} {stats["dcim_records_seen"]}',
+        "",
+        "# HELP topology_agent_drift_suggestions_generated_total Total drift suggestions",
+        "# TYPE topology_agent_drift_suggestions_generated_total counter",
+        f'topology_agent_drift_suggestions_generated_total{{service="topology-agent"}} {stats["drift_suggestions_generated"]}',
+    ]
+    return Response("\n".join(lines), media_type="text/plain; version=0.0.4")
+
+
 @app.get("/drift/open")
 async def get_open_drifts(tenant_id: Optional[str] = None, limit: int = 50):
     q = "SELECT * FROM drift_event WHERE status='OPEN'"

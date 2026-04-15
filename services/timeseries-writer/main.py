@@ -145,5 +145,29 @@ def get_stats():
     return {**stats, "pending_batch": len(_batch)}
 
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus metrics endpoint."""
+    from fastapi import Response
+    lines = [
+        "# HELP timeseries_writer_up Service up status",
+        "# TYPE timeseries_writer_up gauge",
+        'timeseries_writer_up{service="timeseries-writer"} 1',
+        "",
+        "# HELP timeseries_writer_rows_written_total Total rows written",
+        "# TYPE timeseries_writer_rows_written_total counter",
+        f'timeseries_writer_rows_written_total{{service="timeseries-writer"}} {stats["rows_written"]}',
+        "",
+        "# HELP timeseries_writer_batches_flushed_total Total batches flushed",
+        "# TYPE timeseries_writer_batches_flushed_total counter",
+        f'timeseries_writer_batches_flushed_total{{service="timeseries-writer"}} {stats["batches_flushed"]}',
+        "",
+        "# HELP timeseries_writer_errors_total Total errors",
+        "# TYPE timeseries_writer_errors_total counter",
+        f'timeseries_writer_errors_total{{service="timeseries-writer"}} {stats["errors"]}',
+    ]
+    return Response("\n".join(lines), media_type="text/plain; version=0.0.4")
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")

@@ -11,7 +11,7 @@ from typing import Optional
 
 import asyncpg
 import uvicorn
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -240,6 +240,17 @@ async def system_overview(tenant_id: Optional[str] = None):
         "pending_reviews": pending_reviews["count"] if pending_reviews else 0,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus metrics endpoint."""
+    lines = [
+        "# HELP insights_api_up Service up status",
+        "# TYPE insights_api_up gauge",
+        'insights_api_up{service="insights-api"} 1',
+    ]
+    return Response("\n".join(lines), media_type="text/plain; version=0.0.4")
 
 
 if __name__ == "__main__":

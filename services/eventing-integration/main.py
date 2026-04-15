@@ -241,6 +241,30 @@ def get_stats():
     return stats
 
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus metrics endpoint."""
+    from fastapi import Response
+    lines = [
+        "# HELP eventing_integration_up Service up status",
+        "# TYPE eventing_integration_up gauge",
+        'eventing_integration_up{service="eventing-integration"} 1',
+        "",
+        "# HELP eventing_integration_drift_events_received_total Total drift events received",
+        "# TYPE eventing_integration_drift_events_received_total counter",
+        f'eventing_integration_drift_events_received_total{{service="eventing-integration"}} {stats["drift_events_received"]}',
+        "",
+        "# HELP eventing_integration_tickets_created_total Total tickets created",
+        "# TYPE eventing_integration_tickets_created_total counter",
+        f'eventing_integration_tickets_created_total{{service="eventing-integration"}} {stats["tickets_created"]}',
+        "",
+        "# HELP eventing_integration_webhook_calls_total Total webhook calls",
+        "# TYPE eventing_integration_webhook_calls_total counter",
+        f'eventing_integration_webhook_calls_total{{service="eventing-integration"}} {stats["webhook_calls"]}',
+    ]
+    return Response("\n".join(lines), media_type="text/plain; version=0.0.4")
+
+
 class ITSMConfigBody(BaseModel):
     tenant_id: str
     endpoint_url: str

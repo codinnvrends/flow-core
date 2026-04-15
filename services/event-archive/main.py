@@ -134,5 +134,25 @@ def get_stats():
     return {**stats, "pending_buffers": pending, "archive_path": ARCHIVE_PATH}
 
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus metrics endpoint."""
+    from fastapi import Response
+    lines = [
+        "# HELP event_archive_up Service up status",
+        "# TYPE event_archive_up gauge",
+        'event_archive_up{service="event-archive"} 1',
+        "",
+        "# HELP event_archive_events_archived_total Total events archived",
+        "# TYPE event_archive_events_archived_total counter",
+        f'event_archive_events_archived_total{{service="event-archive"}} {stats["events_archived"]}',
+        "",
+        "# HELP event_archive_batches_written_total Total batches written",
+        "# TYPE event_archive_batches_written_total counter",
+        f'event_archive_batches_written_total{{service="event-archive"}} {stats["batches_written"]}',
+    ]
+    return Response("\n".join(lines), media_type="text/plain; version=0.0.4")
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")

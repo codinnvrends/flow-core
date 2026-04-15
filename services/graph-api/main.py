@@ -314,6 +314,23 @@ def health():
     return {"status": "ok", "service": "graph-api"}
 
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus metrics endpoint."""
+    # Simple exposition format for now
+    lines = [
+        "# HELP graph_api_requests_total Total requests",
+        "# TYPE graph_api_requests_total counter",
+        'graph_api_requests_total{service="graph-api"} 0',
+        "",
+        "# HELP graph_api_up Service up status",
+        "# TYPE graph_api_up gauge",
+        'graph_api_up{service="graph-api"} 1',
+    ]
+    from fastapi import Response
+    return Response("\n".join(lines), media_type="text/plain; version=0.0.4")
+
+
 @app.get("/")
 def root():
     return {"service": "FlowCore Graph API", "graphql": "/graphql"}

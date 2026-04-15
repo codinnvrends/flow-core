@@ -10,6 +10,7 @@
 #   ./scripts/run_all.sh --no-docker     # skip docker startup
 #   ./scripts/run_all.sh --generate-only # generate SQL/Cypher files only
 #   ./scripts/run_all.sh --skip-generate # skip generation, load existing files
+#   ./scripts/run_all.sh --with-replay   # include synthetic replay service
 #
 # Platform notes
 # --------------
@@ -65,7 +66,7 @@ dexec() { MSYS_NO_PATHCONV=1 docker exec "$@"; }
 
 # ── Argument defaults ─────────────────────────────────────────────────────────
 DAYS=30; DEVICES=500; SEED=42
-USE_DOCKER=true; GENERATE_ONLY=false; SKIP_GENERATE=false
+USE_DOCKER=true; GENERATE_ONLY=false; SKIP_GENERATE=false; WITH_REPLAY=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -75,6 +76,7 @@ while [[ $# -gt 0 ]]; do
     --no-docker)     USE_DOCKER=false;   shift ;;
     --generate-only) GENERATE_ONLY=true; shift ;;
     --skip-generate) SKIP_GENERATE=true; shift ;;
+    --with-replay)   WITH_REPLAY=true;   shift ;;
     *) warn "Unknown argument: $1"; shift ;;
   esac
 done
@@ -107,7 +109,8 @@ containers_running() {
   local compose_file="$1"
   local running_count
   running_count=$(docker compose -f "$compose_file" ps --format json 2>/dev/null | grep -c '"State":"running"' 2>/dev/null || echo "0")
-  [[ "$running_count" -gt 0 ]]
+  running_count=$(echo "$running_count" | tr -d '[:space:]')
+  [[ "${running_count:-0}" -gt 0 ]]
 }
 
 seed_files_exist() {
@@ -577,7 +580,11 @@ if [[ "$USE_DOCKER" == "true" ]]; then
     warn "Platform services already running — skipping stack launch"
   else
     log "Starting platform services (Keycloak + ingestion + processing)..."
-    "$SCRIPT_DIR/stack.sh" up --no-replay
+    if [[ "$WITH_REPLAY" == "true" ]]; then
+      "$SCRIPT_DIR/stack.sh" up
+    else
+      "$SCRIPT_DIR/stack.sh" up --no-replay
+    fi
   fi
 fi
 

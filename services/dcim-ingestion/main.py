@@ -309,6 +309,26 @@ def get_stats():
     return stats
 
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus metrics endpoint."""
+    from fastapi import Response
+    lines = [
+        "# HELP dcim_ingestion_up Service up status",
+        "# TYPE dcim_ingestion_up gauge",
+        'dcim_ingestion_up{service="dcim-ingestion"} 1',
+        "",
+        "# HELP dcim_ingestion_syncs_completed_total Total syncs completed",
+        "# TYPE dcim_ingestion_syncs_completed_total counter",
+        f'dcim_ingestion_syncs_completed_total{{service="dcim-ingestion"}} {stats["syncs_completed"]}',
+        "",
+        "# HELP dcim_ingestion_records_published_total Total records published",
+        "# TYPE dcim_ingestion_records_published_total counter",
+        f'dcim_ingestion_records_published_total{{service="dcim-ingestion"}} {stats["records_published"]}',
+    ]
+    return Response("\n".join(lines), media_type="text/plain; version=0.0.4")
+
+
 @app.get("/sources")
 async def list_sources():
     async with _pool.acquire() as conn:

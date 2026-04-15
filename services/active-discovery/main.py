@@ -260,6 +260,26 @@ def get_stats():
     return stats
 
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus metrics endpoint."""
+    from fastapi import Response
+    lines = [
+        "# HELP active_discovery_up Service up status",
+        "# TYPE active_discovery_up gauge",
+        'active_discovery_up{service="active-discovery"} 1',
+        "",
+        "# HELP active_discovery_scans_completed_total Total discovery scans completed",
+        "# TYPE active_discovery_scans_completed_total counter",
+        f'active_discovery_scans_completed_total{{service="active-discovery"}} {stats["scans_completed"]}',
+        "",
+        "# HELP active_discovery_snmp_results_published_total Total SNMP results published",
+        "# TYPE active_discovery_snmp_results_published_total counter",
+        f'active_discovery_snmp_results_published_total{{service="active-discovery"}} {stats["snmp_results_published"]}',
+    ]
+    return Response("\n".join(lines), media_type="text/plain; version=0.0.4")
+
+
 class ScanRequest(BaseModel):
     subnet: str
     source_id: str

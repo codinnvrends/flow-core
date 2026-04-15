@@ -488,6 +488,30 @@ def get_stats():
     return stats
 
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus metrics endpoint."""
+    from fastapi import Response
+    lines = [
+        "# HELP graph_updater_up Service up status",
+        "# TYPE graph_updater_up gauge",
+        'graph_updater_up{service="graph-updater"} 1',
+        "",
+        "# HELP graph_updater_entities_created_total Total entities created",
+        "# TYPE graph_updater_entities_created_total counter",
+        f'graph_updater_entities_created_total{{service="graph-updater"}} {stats["entities_created"]}',
+        "",
+        "# HELP graph_updater_entities_updated_total Total entities updated",
+        "# TYPE graph_updater_entities_updated_total counter",
+        f'graph_updater_entities_updated_total{{service="graph-updater"}} {stats["entities_updated"]}',
+        "",
+        "# HELP graph_updater_relationships_created_total Total relationships created",
+        "# TYPE graph_updater_relationships_created_total counter",
+        f'graph_updater_relationships_created_total{{service="graph-updater"}} {stats["relationships_created"]}',
+    ]
+    return Response("\n".join(lines), media_type="text/plain; version=0.0.4")
+
+
 @app.get("/cache/size")
 def cache_size():
     return {"entity_cache_size": len(_entity_cache)}

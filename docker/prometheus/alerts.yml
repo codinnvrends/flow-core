@@ -1,0 +1,64 @@
+# =============================================================================
+# Prometheus Alert Rules for FlowCore
+# =============================================================================
+
+groups:
+  # FlowCore Service Health
+  - name: flowcore_services
+    rules:
+      - alert: FlowCoreServiceDown
+        expr: up{job=~"flowcore-.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "FlowCore service {{ $labels.job }} is down"
+          description: "Service {{ $labels.instance }} has been down for more than 1 minute."
+
+      - alert: FlowCoreHighErrorRate
+        expr: rate(http_requests_total{job=~"flowcore-.*",status=~"5.."}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate in {{ $labels.job }}"
+          description: "Error rate is above 10% for 2 minutes."
+
+      - alert: FlowCoreSlowResponses
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=~"flowcore-.*"}[5m])) > 1
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow responses in {{ $labels.job }}"
+          description: "95th percentile latency is above 1 second."
+
+  # Infrastructure (if node-exporter is running)
+  - name: infrastructure
+    rules:
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 80% for 5 minutes."
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 85% for 5 minutes."
+
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Less than 10% disk space remaining on {{ $labels.device }}."

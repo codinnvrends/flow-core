@@ -547,6 +547,30 @@ def get_stats():
     return stats
 
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus metrics endpoint."""
+    lines = [
+        "# HELP classification_agent_classified_total Total devices classified",
+        "# TYPE classification_agent_classified_total counter",
+        f'classification_agent_classified_total{{service="classification-agent"}} {stats["classified"]}',
+        "",
+        "# HELP classification_agent_needs_review_total Total devices needing review",
+        "# TYPE classification_agent_needs_review_total counter",
+        f'classification_agent_needs_review_total{{service="classification-agent"}} {stats["needs_review"]}',
+        "",
+        "# HELP classification_agent_errors_total Total errors",
+        "# TYPE classification_agent_errors_total counter",
+        f'classification_agent_errors_total{{service="classification-agent"}} {stats["errors"]}',
+        "",
+        "# HELP classification_agent_up Service up status",
+        "# TYPE classification_agent_up gauge",
+        'classification_agent_up{service="classification-agent"} 1',
+    ]
+    from fastapi import Response
+    return Response("\n".join(lines), media_type="text/plain; version=0.0.4")
+
+
 class ClassifyRequest(BaseModel):
     payload: dict
     source: str = "snmp"  # snmp | bmc
