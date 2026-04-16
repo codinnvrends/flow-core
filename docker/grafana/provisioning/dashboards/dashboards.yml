@@ -1,0 +1,29 @@
+# =============================================================================
+# FlowCore — Grafana Dashboard Provisioning
+# Auto-loads dashboard JSON files on Grafana startup.
+# =============================================================================
+
+apiVersion: 1
+
+providers:
+  # ── FlowCore System Dashboards ─────────────────────────────────────────────
+  - name: FlowCore System
+    orgId: 1
+    folder: FlowCore
+    folderUid: flowcore-system
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/flowcore
+
+  # ── Default Grafana Dashboards (keep existing) ───────────────────────────
+  - name: 'default'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

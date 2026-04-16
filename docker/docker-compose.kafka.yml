@@ -110,7 +110,7 @@ services:
             enabled: true
             urls: ["http://kafka:9644"]
     ports:
-      - "${KAFKA_UI_PORT:-8090}:8080"
+      - "${KAFKA_UI_PORT:-8091}:8080"
     depends_on:
       kafka:
         condition: service_healthy

@@ -1,0 +1,80 @@
+# =============================================================================
+# FlowCore — Grafana Data Source Provisioning
+# Auto-configures connections to FlowCore's data stores on startup.
+# =============================================================================
+
+apiVersion: 1
+
+datasources:
+  # ── TimescaleDB (Layer 3: Telemetry & Time-Series) ─────────────────────────
+  - name: FlowCore-TimescaleDB
+    type: postgres
+    uid: flowcore-timescaledb
+    url: timescaledb:5432
+    user: flowcore
+    isDefault: true
+    secureJsonData:
+      password: flowcore_secret
+    jsonData:
+      database: flowcore_ts
+      sslmode: disable
+      maxOpenConns: 100
+      maxIdleConns: 100
+      maxIdleConnsAuto: true
+      connMaxLifetime: 14400
+      # TimescaleDB specific
+      timescaledb: true
+      # Query timeout
+      queryTimeout: 60
+    editable: false
+
+  # ── PostgreSQL (Layer 2 & 4: Metadata & AI Outcomes) ───────────────────────
+  - name: FlowCore-PostgreSQL
+    type: postgres
+    uid: flowcore-postgres
+    url: postgres:5432
+    user: flowcore
+    isDefault: false
+    secureJsonData:
+      password: flowcore_secret
+    jsonData:
+      database: flowcore
+      sslmode: disable
+      maxOpenConns: 50
+      maxIdleConns: 50
+      maxIdleConnsAuto: true
+      connMaxLifetime: 14400
+      queryTimeout: 60
+    editable: false
+
+  # ── Neo4j Graph (Layer 1: Topology) ──────────────────────────────────────
+  # Note: Neo4j requires the "Neo4j Graph Data Science" or "Neo4j" plugin.
+  # For now, we configure HTTP API access. Install plugin via GF_INSTALL_PLUGINS.
+  - name: FlowCore-Neo4j
+    type: frser-grafana-neo4j-datasource
+    uid: flowcore-neo4j
+    url: http://neo4j:7474
+    isDefault: false
+    basicAuth: true
+    basicAuthUser: neo4j
+    secureJsonData:
+      basicAuthPassword: flowcore_secret
+    jsonData:
+      url: http://neo4j:7474
+      database: neo4j
+    editable: false
+
+  # ── Prometheus (Optional - for container metrics if enabled) ──────────────
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    url: http://prometheus:9090
+    isDefault: false
+    editable: false
+    jsonData:
+      httpMethod: POST
+      manageAlerts: false
+      prometheusType: Prometheus
+      prometheusVersion: 2.44.0
+      cacheLevel: 'Low'
+      incrementalQuerying: true

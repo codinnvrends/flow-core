@@ -4,7 +4,7 @@
 # Run from the flowcore/ root directory.
 #
 # Usage:
-#   ./scripts/stack.sh up          # start full stack (Option A with replay)
+#   ./scripts/stack.sh up          # start full stack (Option A with replay, 6 steps)
 #   ./scripts/stack.sh up --no-replay   # start without synthetic replay
 #   ./scripts/stack.sh down        # stop all containers (keep volumes)
 #   ./scripts/stack.sh down -v     # stop and wipe all data
@@ -14,6 +14,14 @@
 #   ./scripts/stack.sh status      # show all container states + ports
 #   ./scripts/stack.sh stores      # start stores only
 #   ./scripts/stack.sh ps          # show running containers
+#
+# Stack components (6 layers):
+#   1. stores (postgres, timescaledb, neo4j)
+#   2. kafka (redpanda + topic init + kafka-ui)
+#   3. platform (keycloak + ingestion + processing)
+#   4. agents (topology + classification + mlflow)
+#   5. api-ui (nginx + APIs + frontend)
+#   6. grafana (observability dashboards)
 # =============================================================================
 
 set -euo pipefail
@@ -53,6 +61,7 @@ F_PLATFORM="$DOCKER_DIR/docker-compose.platform.yml"
 F_REPLAY="$DOCKER_DIR/docker-compose.replay.yml"
 F_AGENTS="$DOCKER_DIR/docker-compose.agents.yml"
 F_API="$DOCKER_DIR/docker-compose.api.yml"
+F_GRAFANA="$DOCKER_DIR/docker-compose.grafana.yml"
 F_FULL="$DOCKER_DIR/docker-compose.full.yml"
 ENV_FILE="$DOCKER_DIR/.env"
 
@@ -94,9 +103,9 @@ case "$CMD" in
     done
 
     # Step 2 — Kafka
-    log "Step 2/5 — Kafka (Redpanda + topic init)..."
+    log "Step 2/5 — Kafka (Redpanda + topic init + Kafka UI)..."
     ensure_network
-    $DC -f "$F_STORES" -f "$F_KAFKA" --env-file "$ENV_FILE" up -d kafka
+    $DC -f "$F_STORES" -f "$F_KAFKA" --env-file "$ENV_FILE" up -d kafka kafka-ui
     log "Waiting for Kafka to be ready..."
     for i in $(seq 1 30); do
       if MSYS_NO_PATHCONV=1 docker exec flowcore-kafka rpk cluster health \
@@ -148,7 +157,7 @@ case "$CMD" in
     done
 
     # Step 5 — API + UI
-    log "Step 5/5 — API gateway + NOC frontend..."
+    log "Step 5/6 — API gateway + NOC frontend..."
     $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" -f "$F_API" \
         --env-file "$ENV_FILE" up -d api-ui
     log "Waiting for API + UI..."
@@ -161,14 +170,29 @@ case "$CMD" in
       [[ $i -eq 20 ]] && warn "API+UI not healthy after 100s"
     done
 
+    # Step 6 — Grafana
+    log "Step 6/6 — Grafana observability..."
+    $DC -f "$F_STORES" -f "$F_GRAFANA" --env-file "$ENV_FILE" up -d grafana
+    log "Waiting for Grafana..."
+    for i in $(seq 1 20); do
+      if docker inspect --format='{{.State.Health.Status}}' flowcore-grafana \
+           2>/dev/null | grep -q healthy; then
+        ok "Grafana healthy"; break
+      fi
+      sleep 5
+      [[ $i -eq 20 ]] && warn "Grafana not healthy after 100s"
+    done
+
     hdr "Stack Ready"
     echo -e "${W}Service endpoints:${N}"
     echo "  NOC Frontend     ->  http://localhost:${API_GATEWAY_PORT:-8888}/"
     echo "  GraphQL          ->  http://localhost:${API_GATEWAY_PORT:-8888}/graphql"
     echo "  Insights API     ->  http://localhost:${API_GATEWAY_PORT:-8888}/api/insights/"
-    echo "  Kafka UI         ->  http://localhost:${REDPANDA_UI_PORT:-8090}/"
+    echo "  Kafka UI (built-in) ->  http://localhost:${REDPANDA_UI_PORT:-8090}/"
+    echo "  Kafka UI (console)  ->  http://localhost:${KAFKA_UI_PORT:-8091}/"
     echo "  MLflow           ->  http://localhost:${MLFLOW_PORT:-5000}/"
     echo "  Keycloak         ->  http://localhost:${KEYCLOAK_PORT:-8080}/"
+    echo "  Grafana          ->  http://localhost:${GRAFANA_PORT:-3000}/"
     echo "  Replay control   ->  http://localhost:${REPLAY_PORT:-8050}/status"
     echo ""
     echo -e "${W}Test credentials:${N}"
@@ -210,20 +234,22 @@ case "$CMD" in
     $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" -f "$F_API" --env-file "$ENV_FILE" build api-ui
     log "Building replay image..."
     $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_REPLAY" --env-file "$ENV_FILE" build synthetic-replay
+    log "Grafana uses official image - no build needed."
     ok "All images built."
     ;;
 
   # ── Restart a group ───────────────────────────────────────────────────────
   restart)
     GROUP="${1:-}"
-    [[ -z "$GROUP" ]] && err "Usage: stack.sh restart <stores|kafka|platform|agents|api-ui|replay>"
+    [[ -z "$GROUP" ]] && err "Usage: stack.sh restart <stores|kafka|kafka-ui|platform|agents|api-ui|replay|grafana>"
     case "$GROUP" in
       stores)   $DC -f "$F_STORES" --env-file "$ENV_FILE" restart ;;
-      kafka)    $DC -f "$F_STORES" -f "$F_KAFKA" --env-file "$ENV_FILE" restart kafka ;;
+      kafka)    $DC -f "$F_STORES" -f "$F_KAFKA" --env-file "$ENV_FILE" restart kafka kafka-ui ;;
       platform) $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" --env-file "$ENV_FILE" restart platform ;;
       agents)   $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" --env-file "$ENV_FILE" restart agents ;;
       api-ui)   $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_PLATFORM" -f "$F_AGENTS" -f "$F_API" --env-file "$ENV_FILE" restart api-ui ;;
       replay)   $DC -f "$F_STORES" -f "$F_KAFKA" -f "$F_REPLAY" --env-file "$ENV_FILE" restart synthetic-replay ;;
+      grafana)  $DC -f "$F_STORES" -f "$F_GRAFANA" --env-file "$ENV_FILE" restart grafana ;;
       *) err "Unknown group: $GROUP" ;;
     esac
     ok "$GROUP restarted."
@@ -238,12 +264,14 @@ case "$CMD" in
       timescaledb)        CTR="flowcore-timescaledb" ;;
       neo4j)              CTR="flowcore-neo4j" ;;
       kafka)              CTR="flowcore-kafka" ;;
+      kafka-ui)           CTR="flowcore-kafka-ui" ;;
       platform)           CTR="flowcore-platform" ;;
       agents)             CTR="flowcore-agents" ;;
       api-ui|api|ui)      CTR="flowcore-api-ui" ;;
       replay)             CTR="flowcore-replay" ;;
+      grafana)            CTR="flowcore-grafana" ;;
       all|"")             $DC -f "$F_FULL" --env-file "$ENV_FILE" logs -f; exit 0 ;;
-      *) err "Unknown group: $GROUP. Use: stores kafka platform agents api-ui replay all" ;;
+      *) err "Unknown group: $GROUP. Use: stores kafka kafka-ui platform agents api-ui replay grafana all" ;;
     esac
     docker logs -f "$CTR"
     ;;
@@ -259,10 +287,12 @@ case "$CMD" in
       flowcore-neo4j \
       flowcore-kafka \
       flowcore-kafka-init \
+      flowcore-kafka-ui \
       flowcore-platform \
       flowcore-replay \
       flowcore-agents \
-      flowcore-api-ui; do
+      flowcore-api-ui \
+      flowcore-grafana; do
       status=$(docker inspect --format='{{.State.Status}}' "$ctr" 2>/dev/null || echo "not found")
       health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}' \
                "$ctr" 2>/dev/null || echo "-")
@@ -279,10 +309,14 @@ case "$CMD" in
     ENV_PORT_KAFKA=$(grep "^REDPANDA_UI_PORT" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "8090")
     ENV_PORT_MLFLOW=$(grep "^MLFLOW_PORT" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "5000")
     ENV_PORT_KC=$(grep "^KEYCLOAK_PORT" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "8080")
-    echo "  NOC UI + APIs  ->  http://localhost:${ENV_PORT_API}/"
-    echo "  Kafka UI       ->  http://localhost:${ENV_PORT_KAFKA}/"
+    echo "  NOC UI + APIs     ->  http://localhost:${ENV_PORT_API}/"
+    echo "  Kafka UI (8090)   ->  http://localhost:${ENV_PORT_KAFKA}/"
+    ENV_PORT_KAFKA_UI=$(grep "^KAFKA_UI_PORT" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "8091")
+    echo "  Kafka UI (8091)   ->  http://localhost:${ENV_PORT_KAFKA_UI}/"
     echo "  MLflow         ->  http://localhost:${ENV_PORT_MLFLOW}/"
     echo "  Keycloak       ->  http://localhost:${ENV_PORT_KC}/"
+    ENV_PORT_GRAFANA=$(grep "^GRAFANA_PORT" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "3000")
+    echo "  Grafana        ->  http://localhost:${ENV_PORT_GRAFANA}/"
     ;;
 
   # ── Help ──────────────────────────────────────────────────────────────────
@@ -300,7 +334,7 @@ case "$CMD" in
     echo -e "  ${C}./scripts/stack.sh logs <group>${N}          Tail logs for a group"
     echo -e "  ${C}./scripts/stack.sh status${N}                Show all container states"
     echo ""
-    echo -e "  Groups: ${Y}stores  kafka  platform  agents  api-ui  replay  all${N}"
+    echo -e "  Groups: ${Y}stores  kafka  kafka-ui  platform  agents  api-ui  replay  grafana  all${N}"
     echo ""
     ;;
 esac

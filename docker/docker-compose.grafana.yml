@@ -1,0 +1,117 @@
+version: "3.9"
+# =============================================================================
+# FlowCore — Grafana Observability Stack
+#
+# Provides visualization for FlowCore metrics, logs, and AI outcomes.
+# Auto-provisions datasources for TimescaleDB, PostgreSQL, and Neo4j.
+# Integrates with existing Keycloak for SSO authentication.
+#
+# Datasources:
+#   - TimescaleDB (Layer 3): metrics, rollups, alerts, logs
+#   - PostgreSQL (Layer 2 & 4): drift events, classifications, forecasts
+#   - Neo4j (Layer 1): topology visualizations (via HTTP API)
+#
+# Access: http://localhost:3000/
+# Default admin: admin / GRAFANA_ADMIN_PASSWORD (from .env)
+#
+# Run standalone:
+#   docker compose -f docker/docker-compose.yml \
+#                  -f docker/docker-compose.grafana.yml up -d grafana
+#
+# Or via the full orchestrator:
+#   docker compose -f docker/docker-compose.full.yml up -d grafana
+# =============================================================================
+
+services:
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: flowcore-grafana
+    restart: unless-stopped
+    environment:
+      # ── Basic Configuration ─────────────────────────────────────────────────
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_ALLOW_ORG_CREATE: "false"
+      
+      # ── Server Configuration ────────────────────────────────────────────────
+      GF_SERVER_HTTP_PORT: ${GRAFANA_PORT:-3000}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000/}
+      
+      # ── Database (SQLite default - sufficient for single-node) ─────────────
+      # For HA, switch to PostgreSQL using same flowcore-postgres
+      
+      # ── Logging ───────────────────────────────────────────────────────────
+      GF_LOG_LEVEL: ${GRAFANA_LOG_LEVEL:-info}
+      GF_LOG_MODE: console
+      
+      # ── Plugins ─────────────────────────────────────────────────────────────
+      GF_INSTALL_PLUGINS: frser-grafana-neo4j-datasource
+      
+      # ── Feature Toggles ───────────────────────────────────────────────────
+      GF_FEATURE_TOGGLES_ENABLE: publicDashboards,tempoApmTable
+      
+      # ── Keycloak SSO Configuration (OIDC) ───────────────────────────────────
+      GF_AUTH_GENERIC_OAUTH_ENABLED: ${GRAFANA_KEYCLOAK_ENABLED:-true}
+      GF_AUTH_GENERIC_OAUTH_NAME: Keycloak
+      GF_AUTH_GENERIC_OAUTH_ALLOW_SIGN_UP: "true"
+      GF_AUTH_GENERIC_OAUTH_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-flowcore-app}
+      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-flowcore-client-secret}
+      GF_AUTH_GENERIC_OAUTH_SCOPES: openid email profile
+      GF_AUTH_GENERIC_OAUTH_AUTH_URL: http://localhost:${KEYCLOAK_PORT:-8080}/realms/${KEYCLOAK_REALM:-flowcore}/protocol/openid-connect/auth
+      GF_AUTH_GENERIC_OAUTH_TOKEN_URL: http://flowcore-keycloak:8080/realms/${KEYCLOAK_REALM:-flowcore}/protocol/openid-connect/token
+      GF_AUTH_GENERIC_OAUTH_API_URL: http://flowcore-keycloak:8080/realms/${KEYCLOAK_REALM:-flowcore}/protocol/openid-connect/userinfo
+      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH: contains(roles[*], 'admin') && 'Admin' || contains(roles[*], 'editor') && 'Editor' || 'Viewer'
+      # Note: Role mapping from Keycloak to Grafana: admin→Admin, editor→Editor, viewer→Viewer
+      
+      # ── Anonymous Access (disabled when SSO enabled) ───────────────────────
+      GF_AUTH_ANONYMOUS_ENABLED: ${GRAFANA_ANON_ENABLED:-false}
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      
+      # ── Rendering/Snapshots ───────────────────────────────────────────────
+      GF_RENDERING_SERVER_URL: http://flowcore-grafana:8081/render
+      
+      # ── Provisioning Paths ────────────────────────────────────────────────
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+      
+    volumes:
+      # Persistent storage for dashboards, users, and settings
+      - grafana_data:/var/lib/grafana
+      
+      # Auto-provisioning configuration (mounted read-only)
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      
+      # Custom dashboards directory
+      - ./grafana/dashboards:/var/lib/grafana/dashboards/flowcore:ro
+      
+    depends_on:
+      postgres:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      # Keycloak is optional for initial startup (Grafana can start without it)
+      
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+      
+    networks:
+      - flowcore-net
+
+# ── Volume for persistent Grafana data ───────────────────────────────────────
+volumes:
+  grafana_data:
+
+# ── Network (external - created by docker-compose.yml) ─────────────────────────
+networks:
+  flowcore-net:
+    external: true
+    name: flowcore_flowcore-net

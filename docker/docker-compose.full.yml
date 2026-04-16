@@ -21,6 +21,7 @@ version: "3.9"
 #      replay    (synthetic data publisher)           — compose.replay.yml (parallel with platform)
 #   4. agents    (topology + classification + mlflow) — compose.agents.yml
 #   5. api-ui    (nginx + 3 APIs + frontend)          — compose.api.yml
+#   6. grafana   (observability dashboards)           — compose.grafana.yml
 #
 # To rebuild all images after code changes:
 #   docker compose -f docker/docker-compose.full.yml build
@@ -47,3 +48,7 @@ include:
 
   # Layer 4: API gateway + UI
   - path: docker-compose.api.yml
+
+  # Layer 5: Grafana observability (visualization for all data layers)
+  - path: docker-compose.grafana.yml
+
