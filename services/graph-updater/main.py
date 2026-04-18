@@ -202,12 +202,17 @@ async def pg_write_identity_signals(signals: list[dict], entity_id: str,
                                      tenant_id: str, source_id: str) -> None:
     async with _pg_pool.acquire() as conn:
         for s in signals:
+            # The schema has no unique constraint on (entity_id, signal_type, signal_value),
+            # so we guard with a NOT EXISTS check to prevent unbounded duplicate rows.
             await conn.execute(
                 """
                 INSERT INTO identity_signal(entity_id, source_id, tenant_id, signal_type, signal_value,
                                             match_confidence, resolution_status, observed_at, resolved_at)
-                VALUES($1,$2,$3,$4,$5,1.0,'RESOLVED',NOW(),NOW())
-                ON CONFLICT DO NOTHING
+                SELECT $1,$2,$3,$4,$5,1.0,'RESOLVED',NOW(),NOW()
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM identity_signal
+                    WHERE entity_id=$1 AND signal_type=$4 AND signal_value=$5
+                )
                 """,
                 entity_id, source_id, tenant_id, s["signal_type"], s["signal_value"],
             )
@@ -281,11 +286,17 @@ def handle_dcim_normalized(msg: dict) -> None:
 def handle_metric(msg: dict) -> None:
     try:
         entity_id = msg.get("entity_id")
-        metric_id = msg.get("metric_id", "")
         value = msg.get("value", 0)
+        # Use canonical_metric_name for the Neo4j property suffix (e.g. "power_draw_w"
+        # → n.live_power_draw_w).  Fall back to metric_id only if name is absent so
+        # older messages don't break, but sanitise hyphens so the property name is valid.
+        metric_name = (
+            msg.get("canonical_metric_name")
+            or msg.get("metric_id", "unknown")[:30].replace("-", "_")
+        )
 
         if entity_id and value is not None:
-            neo4j_update_metric(entity_id, metric_id[:20], float(value))
+            neo4j_update_metric(entity_id, metric_name, float(value))
             stats["metrics_processed"] += 1
     except Exception as e:
         stats["errors"] += 1

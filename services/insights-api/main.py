@@ -499,7 +499,7 @@ async def thermal_units(tenant_id: Optional[str] = None):
                unit.canonical_name AS unit_name,
                unit.live_power_draw_w AS power_w,
                unit.live_airflow_cfm  AS airflow_cfm,
-               unit.health_status     AS health_status,
+               coalesce(unit.health_state, unit.operational_status) AS health_status,
                loc.location_id    AS zone_id,
                loc.canonical_name AS zone_name
         ORDER BY loc.canonical_name, unit.canonical_name
@@ -706,26 +706,39 @@ async def power_forecast(tenant_id: Optional[str] = None):
         rows = []
         if tenant_id:
             rows = await conn.fetch(
-                """SELECT horizon_label, predicted_value AS kw
+                """SELECT horizon_label, predicted_value, unit
                    FROM capacity_forecast
                    WHERE tenant_id = $1
                    ORDER BY horizon_ts LIMIT 3""",
                 tenant_id,
             )
 
+    def _to_mw(value: float, unit: str) -> float:
+        """Normalise any power unit to MW."""
+        unit = (unit or "kW").upper()
+        if unit == "W":
+            return value / 1_000_000
+        if unit in ("KW", "KW"):
+            return value / 1_000
+        if unit == "MW":
+            return value
+        # Unknown unit — assume kW (most common for capacity forecasts)
+        return value / 1_000
+
     if rows:
         return [{"horizon_label": r["horizon_label"],
-                 "predicted_mw":      round(r["kw"] / 1000, 3),
-                 "predicted_cost_eur": round(r["kw"] / 1000 * tariff, 2)}
+                 "predicted_mw":       round(_to_mw(r["predicted_value"], r["unit"]), 3),
+                 "predicted_cost_eur": round(_to_mw(r["predicted_value"], r["unit"]) * tariff, 2)}
                 for r in rows]
 
+    # Hardcoded fallback — labels match schema CHECK ('7d','30d','90d')
     return [
-        {"horizon_label": "Next 1h",  "predicted_mw": 2.42,
-         "predicted_cost_eur": round(2.42 * tariff, 2)},
-        {"horizon_label": "Next 6h",  "predicted_mw": 2.51,
-         "predicted_cost_eur": round(2.51 * 6 * tariff, 2)},
-        {"horizon_label": "Next 24h", "predicted_mw": 2.48,
-         "predicted_cost_eur": round(2.48 * 24 * tariff, 2)},
+        {"horizon_label": "7d",  "predicted_mw": 2.42,
+         "predicted_cost_eur": round(2.42 * 24 * 7  * tariff, 2)},
+        {"horizon_label": "30d", "predicted_mw": 2.51,
+         "predicted_cost_eur": round(2.51 * 24 * 30 * tariff, 2)},
+        {"horizon_label": "90d", "predicted_mw": 2.48,
+         "predicted_cost_eur": round(2.48 * 24 * 90 * tariff, 2)},
     ]
 
 
@@ -782,10 +795,12 @@ async def list_alerts(
                 f"""SELECT
                   COUNT(*) FILTER (WHERE ae.canonical_severity='CRITICAL'
                                      AND ae.status='ACTIVE')         AS critical,
-                  COUNT(*) FILTER (WHERE ae.canonical_severity='WARNING'
-                                     AND ae.status='ACTIVE')         AS warning,
-                  COUNT(*) FILTER (WHERE ae.canonical_severity='INFO'
-                                     AND ae.status='ACTIVE')         AS info,
+                  COUNT(*) FILTER (WHERE ae.canonical_severity='HIGH'
+                                     AND ae.status='ACTIVE')         AS high,
+                  COUNT(*) FILTER (WHERE ae.canonical_severity='MEDIUM'
+                                     AND ae.status='ACTIVE')         AS medium,
+                  COUNT(*) FILTER (WHERE ae.canonical_severity='LOW'
+                                     AND ae.status='ACTIVE')         AS low,
                   COUNT(*) FILTER (WHERE ae.status='RESOLVED'
                     AND ae.event_ts::date = CURRENT_DATE)            AS resolved_today
                 FROM alert_event ae
@@ -795,8 +810,9 @@ async def list_alerts(
             )
             counts = {
                 "critical":       int(counts_row["critical"]       or 0),
-                "warning":        int(counts_row["warning"]        or 0),
-                "info":           int(counts_row["info"]           or 0),
+                "high":           int(counts_row["high"]           or 0),
+                "medium":         int(counts_row["medium"]         or 0),
+                "low":            int(counts_row["low"]            or 0),
                 "resolved_today": int(counts_row["resolved_today"] or 0),
             }
 
@@ -833,7 +849,7 @@ async def list_alerts(
             )
             total  = int((neo[0].get("total") or 0)) if neo else 0
             items  = []
-            counts = {"critical": total, "warning": 0, "info": 0, "resolved_today": 0}
+            counts = {"critical": total, "high": 0, "medium": 0, "low": 0, "resolved_today": 0}
 
     return {"counts": counts, "items": items, "total": len(items)}
 
@@ -850,8 +866,7 @@ async def acknowledge_alert(alert_id: str, tenant_id: Optional[str] = None):
 async def resolve_alert(alert_id: str, tenant_id: Optional[str] = None):
     async with _ts_pool.acquire() as conn:
         await conn.execute(
-            "UPDATE alert_event SET status='RESOLVED', resolved_at=NOW() "
-            "WHERE alert_id=$1", alert_id)
+            "UPDATE alert_event SET status='RESOLVED' WHERE alert_id=$1", alert_id)
     return {"status": "resolved", "alert_id": alert_id}
 
 

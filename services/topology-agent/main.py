@@ -168,9 +168,9 @@ async def emit_drift_suggestion(drift_id: str, tenant_id: str,
     async with _pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO drift_suggestion(suggestion_id, drift_id, tenant_id, proposed_action, operator_decision)
-            VALUES($1,$2,$3,$4,'PENDING')
-            ON CONFLICT DO NOTHING
+            INSERT INTO drift_suggestion(suggestion_id, drift_id, tenant_id, proposed_action)
+            VALUES($1,$2,$3,$4)
+            ON CONFLICT (suggestion_id) DO NOTHING
             """,
             suggestion_id, drift_id, tenant_id, proposed_action,
         )

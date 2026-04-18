@@ -53,7 +53,7 @@ async def load_itsm_config(tenant_id: str) -> Optional[dict]:
 
 async def create_servicenow_ticket(config: dict, drift_event: dict) -> Optional[str]:
     """Create a ServiceNow incident from a drift event."""
-    base_url = config.get("endpoint_url", "")
+    base_url = config.get("target_system_url", "")
     if not base_url:
         return None
 
@@ -90,16 +90,20 @@ async def create_servicenow_ticket(config: dict, drift_event: dict) -> Optional[
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             headers = {"Content-Type": "application/json", "Accept": "application/json"}
+            auth_config = config.get("auth_config") or {}
+            if isinstance(auth_config, str):
+                import json as _json
+                auth_config = _json.loads(auth_config)
             auth_type = config.get("auth_type", "BASIC")
 
             if auth_type == "BASIC":
-                auth = (config.get("username", ""), config.get("api_key", ""))
+                auth = (auth_config.get("username", ""), auth_config.get("api_key", ""))
                 resp = await client.post(
                     f"{base_url}/api/now/table/incident",
                     json=payload, headers=headers, auth=auth
                 )
             else:
-                headers["Authorization"] = f"Bearer {config.get('api_key', '')}"
+                headers["Authorization"] = f"Bearer {auth_config.get('api_key', '')}"
                 resp = await client.post(
                     f"{base_url}/api/now/table/incident",
                     json=payload, headers=headers
@@ -153,7 +157,10 @@ async def handle_drift_event(event: dict) -> None:
                 )
 
     # Send webhook if configured (even without ITSM)
-    webhook_url = (config or {}).get("webhook_url")
+    _auth_cfg = (config or {}).get("auth_config") or {}
+    if isinstance(_auth_cfg, str):
+        import json as _json2; _auth_cfg = _json2.loads(_auth_cfg)
+    webhook_url = _auth_cfg.get("webhook_url")
     if webhook_url:
         await send_webhook(webhook_url, {
             "event_type": "drift_detected",
@@ -259,22 +266,28 @@ async def upsert_itsm_config(body: ITSMConfigBody):
         await conn.execute(
             """
             INSERT INTO itsm_integration_config(
-                config_id, tenant_id, integration_type, endpoint_url,
-                auth_type, payload_template, is_active, created_at)
-            VALUES($1,$2,'SERVICENOW',$3,$4,$5,true,NOW())
-            ON CONFLICT(tenant_id, integration_type) DO UPDATE
-              SET endpoint_url=EXCLUDED.endpoint_url,
-                  auth_type=EXCLUDED.auth_type,
-                  payload_template=EXCLUDED.payload_template
+                config_id, tenant_id, target_system, target_system_url,
+                auth_type, auth_config, payload_mapping_template,
+                trigger_event_type, is_active, created_at, updated_at)
+            VALUES($1,$2,'SERVICENOW',$3,$4,$5,$6,'DRIFT_EVENT',true,NOW(),NOW())
+            ON CONFLICT (config_id) DO UPDATE
+              SET target_system_url        = EXCLUDED.target_system_url,
+                  auth_type                = EXCLUDED.auth_type,
+                  auth_config              = EXCLUDED.auth_config,
+                  payload_mapping_template = EXCLUDED.payload_mapping_template,
+                  updated_at               = NOW()
             """,
-            str(uuid.uuid4()), body.tenant_id, body.endpoint_url, body.auth_type,
+            str(uuid.uuid4()),
+            body.tenant_id,
+            body.endpoint_url,
+            body.auth_type,
             json.dumps({
+                "username":         body.username,
+                "api_key":          body.api_key,
+                "webhook_url":      body.webhook_url,
                 "assignment_group": body.assignment_group,
-                "username": body.username,
-                "api_key": body.api_key,
-                "webhook_url": body.webhook_url,
-                **(body.payload_template or {}),
             }),
+            json.dumps(body.payload_template or {}),
         )
     return {"status": "configured"}
 

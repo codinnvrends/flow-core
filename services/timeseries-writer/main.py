@@ -79,11 +79,21 @@ def consumer_thread():
                 continue
             try:
                 m = json.loads(msg.value().decode())
+                import uuid as _uuid_mod
+                # Validate metric_id is a proper UUID before queuing —
+                # metric_datapoint.metric_id is UUID FK to metric_catalogue.
+                metric_id_raw = m.get("metric_id")
+                try:
+                    _uuid_mod.UUID(str(metric_id_raw))
+                except (ValueError, TypeError):
+                    logger.debug(f"Dropping metric with non-UUID metric_id: {metric_id_raw}")
+                    continue
+
                 row = (
                     m.get("tenant_id"),
                     m.get("entity_id"),
                     m.get("entity_class", "DEVICE"),
-                    m.get("metric_id"),
+                    metric_id_raw,
                     m.get("source_id"),
                     float(m.get("value", 0)),
                     m.get("event_ts", datetime.now(timezone.utc).isoformat()),

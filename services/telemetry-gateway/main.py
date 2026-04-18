@@ -34,7 +34,8 @@ stats = {
 }
 
 _producer: Optional[Producer] = None
-_pool: Optional[asyncpg.Pool] = None
+_pool: Optional[asyncpg.Pool] = None      # PostgreSQL
+_ts_pool: Optional[asyncpg.Pool] = None   # TimescaleDB
 
 # Source metric → canonical metric_id cache (loaded from DB)
 _metric_map: dict = {}       # source_metric_name → (metric_id, conversion_expr)
@@ -44,8 +45,21 @@ _alert_type_map: dict = {}   # canonical_alert_name → (alert_type_id, default_
 
 async def load_metric_catalogue():
     """Load METRIC_SOURCE_MAPPING into memory for fast lookup."""
+    # source_system lives in PostgreSQL
     async with _pool.acquire() as conn:
-        rows = await conn.fetch("""
+        rows2 = await conn.fetch(
+            "SELECT source_id, tenant_id, source_name FROM source_system "
+            "WHERE source_class='TELEMETRY' AND status='ACTIVE'")
+        for r in rows2:
+            _source_map[str(r["source_id"])] = {
+                "source_id": str(r["source_id"]),
+                "tenant_id": str(r["tenant_id"]),
+                "source_name": r["source_name"],
+            }
+
+    # metric_source_mapping, metric_catalogue, alert_catalogue live in TimescaleDB
+    async with _ts_pool.acquire() as ts_conn:
+        rows = await ts_conn.fetch("""
             SELECT msm.source_metric_name, msm.metric_id, msm.unit_conversion_expr,
                    msm.source_id, mc.unit
             FROM metric_source_mapping msm
@@ -59,16 +73,6 @@ async def load_metric_catalogue():
                 "unit": r["unit"],
             }
 
-        rows2 = await conn.fetch(
-            "SELECT source_id, tenant_id, source_name FROM source_system WHERE source_class='TELEMETRY' AND status='ACTIVE'")
-        for r in rows2:
-            _source_map[str(r["source_id"])] = {
-                "source_id": str(r["source_id"]),
-                "tenant_id": str(r["tenant_id"]),
-                "source_name": r["source_name"],
-            }
-
-    async with _pool.acquire() as ts_conn:
         rows3 = await ts_conn.fetch("""
             SELECT alert_type_id, canonical_alert_name, default_severity
             FROM alert_catalogue WHERE is_active=true
@@ -106,13 +110,15 @@ def publish(topic: str, msg: dict, key: Optional[str] = None) -> None:
 
 def make_metric_msg(entity_id: str, entity_class: str, metric_id: str,
                     source_id: str, tenant_id: str, value: float,
-                    event_ts: str, quality: str = "VALID") -> dict:
+                    event_ts: str, quality: str = "VALID",
+                    canonical_metric_name: Optional[str] = None) -> dict:
     return {
         "message_id": str(uuid.uuid4()),
         "tenant_id": tenant_id,
         "entity_id": entity_id,
         "entity_class": entity_class,
         "metric_id": metric_id,
+        "canonical_metric_name": canonical_metric_name,   # used by graph-updater for Neo4j property name
         "source_id": source_id,
         "value": round(value, 4),
         "quality_flag": quality,
@@ -128,8 +134,9 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.on_event("startup")
 async def startup():
-    global _producer, _pool
-    _pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=5)
+    global _producer, _pool, _ts_pool
+    _pool    = await asyncpg.create_pool(PG_DSN,  min_size=1, max_size=5)
+    _ts_pool = await asyncpg.create_pool(TS_DSN,  min_size=1, max_size=5)
     _producer = Producer({
         "bootstrap.servers": KAFKA_BROKERS,
         "client.id": "telemetry-gateway",
@@ -148,6 +155,8 @@ async def shutdown():
         _producer.flush(5)
     if _pool:
         await _pool.close()
+    if _ts_pool:
+        await _ts_pool.close()
 
 
 @app.get("/health")
@@ -204,28 +213,27 @@ async def prometheus_write(request: Request):
             converted = apply_conversion(float(value), mapping["conversion"])
             entity_id = labels.get("instance", labels.get("job", "unknown"))
             msg = make_metric_msg(entity_id, "DEVICE", mapping["metric_id"],
-                                  mapping["source_id"], tenant_id, converted, event_ts)
+                                  mapping["source_id"], tenant_id, converted, event_ts,
+                                  canonical_metric_name=name)
             publish("metrics.timeseries.raw", msg, key=entity_id)
             stats["metrics_received"] += 1
             published += 1
         else:
-            # Unknown metric — publish with placeholder metric_id for archival
+            # Unknown metric — no catalogue entry means no valid metric_id UUID.
+            # Route to events.raw for archival only; do NOT publish to
+            # metrics.timeseries.raw (timeseries-writer would fail FK constraint).
             entity_id = labels.get("instance", "unknown")
-            msg = {
+            publish("events.raw", {
                 "message_id": str(uuid.uuid4()),
+                "event_class": "UNKNOWN_METRIC",
                 "tenant_id": tenant_id,
                 "entity_id": entity_id,
-                "entity_class": "DEVICE",
-                "metric_id": f"unknown:{name}",
-                "source_id": source_id,
+                "source_metric_name": name,
                 "value": float(value),
-                "quality_flag": "VALID",
+                "labels": labels,
                 "event_ts": event_ts,
                 "ingest_ts": now,
-                "source_metric_name": name,
-                "labels": labels,
-            }
-            publish("metrics.timeseries.raw", msg, key=entity_id)
+            }, key=entity_id)
             stats["metrics_received"] += 1
             published += 1
 
@@ -245,11 +253,28 @@ async def receive_metrics(request: Request):
 
     for item in items:
         entity_id = item.get("entity_id", item.get("host", "unknown"))
-        metric_id = item.get("metric_id", "unknown:generic")
+        metric_id = item.get("metric_id")
         value = item.get("value", item.get("v", 0))
-        msg = make_metric_msg(entity_id, item.get("entity_class", "DEVICE"),
-                               metric_id, source_id, tenant_id, float(value), now)
-        publish("metrics.timeseries.raw", msg, key=entity_id)
+
+        # Only publish to timeseries topic if metric_id is a valid UUID
+        try:
+            import uuid as _uuid_mod
+            _uuid_mod.UUID(str(metric_id))
+            msg = make_metric_msg(entity_id, item.get("entity_class", "DEVICE"),
+                                   metric_id, source_id, tenant_id, float(value), now)
+            publish("metrics.timeseries.raw", msg, key=entity_id)
+        except (ValueError, TypeError):
+            # Unknown metric_id — archive via events.raw
+            publish("events.raw", {
+                "message_id": str(uuid.uuid4()),
+                "event_class": "UNKNOWN_METRIC",
+                "tenant_id": tenant_id,
+                "entity_id": entity_id,
+                "metric_id_raw": str(metric_id),
+                "value": float(value),
+                "event_ts": now,
+                "ingest_ts": now,
+            }, key=entity_id)
         stats["metrics_received"] += 1
 
     _producer.flush(1)

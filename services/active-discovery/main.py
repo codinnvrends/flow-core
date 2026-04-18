@@ -182,15 +182,22 @@ async def scan_subnet(subnet: str, tenant_id: str, source_id: str,
     stats["scans_completed"] += 1
     stats["last_scan_at"] = datetime.now(timezone.utc).isoformat()
 
+    # Map freeform scan_type to schema CHECK constraint values
+    scan_type_map = {"snmp": "SNMP_WALK", "bmc": "BMC_REDFISH", "both": "SNMP_WALK"}
+    db_scan_type = scan_type_map.get(scan_type, "SNMP_WALK")
+
     async with _pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO discovery_scan_log(scan_id, source_id, tenant_id, subnet, scan_type,
-                devices_discovered, scan_errors, started_at, completed_at, status)
-            VALUES($1,$2,$3,$4,$5,$6,$7,NOW(),NOW(),'COMPLETED')
-            ON CONFLICT DO NOTHING
+            INSERT INTO discovery_scan_log(
+                scan_id, source_id, tenant_id, scan_type,
+                target_range, hosts_targeted, hosts_responded,
+                entities_discovered, started_at, completed_at, status)
+            VALUES($1,$2,$3,$4,$5,$6,$6,$7,NOW(),NOW(),'COMPLETED')
+            ON CONFLICT (scan_id) DO NOTHING
             """,
-            scan_log_id, source_id, tenant_id, subnet, scan_type, discovered, errors,
+            scan_log_id, source_id, tenant_id, db_scan_type,
+            subnet, len(hosts), discovered,
         )
 
     return {"scan_id": scan_log_id, "subnet": subnet, "discovered": discovered, "errors": errors}
