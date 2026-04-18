@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash -n scripts/destroy-all.sh)",
+      "Bash(bash -n scripts/destroy-databases.sh)",
+      "Bash(bash -n scripts/verify-databases.sh)",
+      "Bash(bash -n scripts/verify-all.sh)",
+      "Bash(bash -n scripts/build-all.sh)",
+      "Bash(bash -n scripts/replay.sh)",
+      "Bash(bash -n scripts/start-services.sh)",
+      "Bash(bash -n scripts/stop-services.sh)",
+      "Bash(bash -n scripts/rebuild.sh)",
+      "Bash(ls scripts/*.sh scripts/*.bat)"
+    ]
+  }
+}

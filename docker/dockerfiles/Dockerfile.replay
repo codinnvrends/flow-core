@@ -24,4 +24,4 @@ COPY services/synthetic-replay/ /app/synthetic-replay/
 WORKDIR /app/synthetic-replay
 EXPOSE 8050
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8050", "--log-level", "info"]
+CMD ["python", "main.py"]

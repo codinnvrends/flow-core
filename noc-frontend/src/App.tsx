@@ -69,8 +69,6 @@ export default function App() {
         {/* Fixed top bar */}
         <TopBar
           facilityName="FlowCore EU-West Alpha"
-          pocStatus="POC — Day 42 / 90"
-          onTrack={true}
           alertCount={alertCount}
           pue={1.43}
         />

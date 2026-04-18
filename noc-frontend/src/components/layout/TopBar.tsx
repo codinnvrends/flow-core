@@ -1,10 +1,10 @@
 /**
  * components/layout/TopBar.tsx
- * Persistent 64px top bar: facility name, POC status, health indicator, alert count, user avatar.
+ * Persistent 64px top bar: facility name, health indicator, alert count, user avatar.
  */
 import React from 'react'
 import {
-  AppBar, Toolbar, Typography, Chip, Box, IconButton, Avatar, Tooltip,
+  AppBar, Toolbar, Typography, Box, IconButton, Avatar, Tooltip,
 } from '@mui/material'
 import {
   NotificationsNone as BellIcon,
@@ -15,16 +15,12 @@ import { SIDEBAR_WIDTH, TOPBAR_HEIGHT } from '../../lib/theme'
 
 interface TopBarProps {
   facilityName?: string
-  pocStatus?: string
-  onTrack?: boolean
   alertCount?: number
   pue?: number
 }
 
 export default function TopBar({
   facilityName = 'FlowCore EU-West Alpha',
-  pocStatus    = 'POC Active',
-  onTrack      = true,
   alertCount   = 0,
   pue          = 0,
 }: TopBarProps) {
@@ -49,20 +45,6 @@ export default function TopBar({
           {facilityName}
         </Typography>
 
-        {/* POC period badge */}
-        <Chip
-          label={pocStatus}
-          size="small"
-          sx={{ bgcolor: 'rgba(8,145,178,0.15)', color: '#0891B2', fontWeight: 600, fontSize: '0.68rem' }}
-        />
-
-        {onTrack && (
-          <Chip
-            label="On Track"
-            size="small"
-            sx={{ bgcolor: 'rgba(5,150,105,0.15)', color: '#059669', fontWeight: 600, fontSize: '0.68rem' }}
-          />
-        )}
 
         <Box sx={{ flex: 1 }} />
 

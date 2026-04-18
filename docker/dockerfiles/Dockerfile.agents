@@ -1,7 +1,12 @@
 # =============================================================================
 # FlowCore — Agents Container
-# Services: topology-reconciliation-agent + classification-capability-agent + MLflow
 # Build context: flowcore/ root
+#
+# Source paths (host)                  → Container paths
+#   services/topology-agent/           → /app/topology-reconciliation-agent/
+#   services/classification-agent/     → /app/classification-capability-agent/
+#
+# supervisord starts both agents + MLflow tracking server on ports 8020, 8021, 5000.
 # =============================================================================
 
 FROM python:3.12-slim

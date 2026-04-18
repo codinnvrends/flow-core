@@ -32,6 +32,12 @@ End-to-end Digital Twin platform for data center infrastructure management with 
 - **TimescaleDB** — Layer 3 time-series telemetry
 - **Neo4j** — Layer 1 graph topology
 
+### Databases + Kafka Only (docker/docker-compose.databases.yml)
+- **For local development** — Starts only the persistent stores and message bus
+- PostgreSQL, TimescaleDB, Neo4j, Kafka/Redpanda, Kafka UI
+- Does NOT start any application services (use when running services natively/IDE)
+- See [Development Mode](#development-mode-databases-only) section
+
 ### Streaming (docker/docker-compose.kafka.yml)
 - **Redpanda (Kafka)** — Event streaming, 12 topics
 - **Kafka UI** — Topic browser at http://localhost:8091/
@@ -106,6 +112,43 @@ docker compose \
   up -d
 ```
 
+### Development Mode (Databases Only)
+
+For local development where you run services in IDE or natively:
+
+**Linux/Mac:**
+```bash
+# Start databases + Kafka only
+./scripts/start-databases.sh
+
+# Check status
+./scripts/status-databases.sh
+
+# Stop when done
+./scripts/stop-databases.sh
+```
+
+**Windows:**
+```batch
+:: Start databases + Kafka only
+.\scripts\start-databases.bat
+
+:: Check status
+.\scripts\status-databases.bat
+
+:: Stop when done
+.\scripts\stop-databases.bat
+```
+
+**Access URLs (Development Mode):**
+| Service | URL | Description |
+|---------|-----|-------------|
+| Neo4j Browser | http://localhost:7474/ | Graph visualization |
+| Kafka UI | http://localhost:8090/ | Topic browser |
+| PostgreSQL | localhost:5432 | Layer 2 + 4 data |
+| TimescaleDB | localhost:5433 | Layer 3 telemetry |
+| Kafka | localhost:9092/19092 | Message bus |
+
 ## Service URLs After Startup
 
 | Service | URL | Description |
@@ -113,7 +156,7 @@ docker compose \
 | **NOC UI** | http://localhost:8888/ | Main dashboard, racks, devices |
 | **GraphQL** | http://localhost:8888/graphql | Digital twin queries |
 | **MLflow UI** | http://localhost:5000/ | ML experiments, model registry |
-| **Kafka UI** | http://localhost:8091/ | Topic browser, consumer groups |
+| Kafka UI | http://localhost:8091/ | Topic browser, consumer groups |
 | **Keycloak** | http://localhost:8080/ | Authentication admin |
 | **Replay API** | http://localhost:8050/ | Synthetic data control |
 | **Neo4j Browser** | http://localhost:7474/ | Graph visualization |
@@ -144,6 +187,7 @@ flowcore/
 ├── docker/
 │   ├── docker-compose.yml              # Core: Postgres, TimescaleDB, Neo4j
 │   ├── docker-compose.kafka.yml        # Redpanda + Kafka UI
+│   ├── docker-compose.databases.yml    # Databases + Kafka only (dev mode)
 │   ├── docker-compose.platform.yml     # Keycloak, Graph Updater, Ingestion
 │   ├── docker-compose.agents.yml       # MLflow, Topology, Classification
 │   ├── docker-compose.api.yml          # GraphQL, Insights, Eventing, NOC UI
@@ -166,7 +210,11 @@ flowcore/
 ├── scripts/
 │   ├── run_all.sh                      # Master bootstrap
 │   ├── container.sh                    # Container manager
-│   └── stack.sh                        # Stack orchestrator
+│   ├── stack.sh                        # Stack orchestrator
+│   ├── start-databases.sh/.bat         # Start databases + Kafka only
+│   ├── stop-databases.sh/.bat          # Stop databases + Kafka
+│   ├── status-databases.sh/.bat        # Check infrastructure status
+│   ├── rebuild-frontend.sh/.bat        # Rebuild NOC frontend
 └── FIXES_SUMMARY.md                    # Troubleshooting guide
 ```
 
@@ -334,6 +382,12 @@ docker exec -it flowcore-timescaledb psql -U flowcore -d flowcore_ts
 # Full startup
 ./scripts/container.sh start
 
+# Databases only (development)
+./scripts/start-databases.sh
+
+# Rebuild frontend after changes
+./scripts/rebuild-frontend.sh
+
 # Or with data generation (first run)
 ./scripts/run_all.sh
 
@@ -348,6 +402,8 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 - `docker/.env` — Environment configuration
 - `scripts/container.sh` — Container management
 - `scripts/run_all.sh` — Complete bootstrap
+- `scripts/start-databases.sh` / `.bat` — Development mode
+- `scripts/rebuild-frontend.sh` / `.bat` — Frontend rebuild
 
 ---
 

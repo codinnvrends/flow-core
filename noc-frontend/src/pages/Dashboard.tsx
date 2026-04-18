@@ -1,6 +1,6 @@
 /**
  * pages/Dashboard.tsx
- * Screens 1, 1.1, 1.2 — Landing page with POC context card, 4 KPI tiles,
+ * Screens 1, 1.1, 1.2 — Landing page with facility context card, 4 KPI tiles,
  * zone list, D3 thermal heatmap, AI recommendations stub, recent alerts,
  * and a system health timeline chart (Recharts).
  */
@@ -11,7 +11,7 @@ import {
   Table, TableBody, TableCell, TableRow,
 } from '@mui/material'
 import {
-  CheckCircle, Warning, Lightbulb, Download, Settings, PlayArrow,
+  Warning, Lightbulb, Download, Settings, PlayArrow,
 } from '@mui/icons-material'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -167,9 +167,6 @@ export default function Dashboard() {
     [timeWindow],
   )
 
-  const pocProgress = facility
-    ? Math.round((facility.day_number / facility.total_days) * 100)
-    : 0
 
   return (
     <PageShell>
@@ -177,7 +174,7 @@ export default function Dashboard() {
 
       {fe && <ErrorAlert message={fe} />}
 
-      {/* ── POC Facility Context Card ── */}
+      {/* ── Facility Context Card ── */}
       <Card sx={{ bgcolor: '#111E2D', mb: 2 }}>
         <CardContent sx={{ p: '16px !important' }}>
           <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
@@ -196,30 +193,6 @@ export default function Dashboard() {
               </Typography>
             </Box>
 
-            {/* POC period */}
-            <Box sx={{ textAlign: 'right' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                <Typography sx={{ fontSize: '0.75rem', color: '#64748B' }}>
-                  POC Day {facility?.day_number} / {facility?.total_days}
-                </Typography>
-                {facility?.on_track
-                  ? <Chip icon={<CheckCircle sx={{ fontSize: '12px !important' }} />} label="On Track" size="small" sx={{ bgcolor: 'rgba(5,150,105,0.15)', color: '#059669', fontSize: '0.65rem' }} />
-                  : <Chip icon={<Warning sx={{ fontSize: '12px !important' }} />} label="Off Track" size="small" sx={{ bgcolor: 'rgba(224,90,90,0.15)', color: '#E05A5A', fontSize: '0.65rem' }} />
-                }
-              </Box>
-              <LinearProgress
-                variant="determinate"
-                value={pocProgress}
-                sx={{
-                  height: 6, borderRadius: 3, width: 180,
-                  bgcolor: 'rgba(255,255,255,0.06)',
-                  '& .MuiLinearProgress-bar': { bgcolor: '#0891B2', borderRadius: 3 },
-                }}
-              />
-              <Typography sx={{ fontSize: '0.68rem', color: '#64748B', mt: 0.5 }}>
-                {facility?.period_start} → {facility?.period_end}
-              </Typography>
-            </Box>
           </Box>
         </CardContent>
       </Card>
